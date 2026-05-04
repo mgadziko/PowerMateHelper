@@ -1,6 +1,11 @@
 import AppKit
+import ServiceManagement
 
 private var powerMateAppDelegate: AppDelegate?
+
+private enum DefaultsKey {
+    static let dockIconVisible = "dockIconVisible"
+}
 
 private enum DiagnosticsLog {
     static let path = "/tmp/PowerMateMGG.log"
@@ -42,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var eventsMenuItem: NSMenuItem?
     private var audioMenuItem: NSMenuItem?
     private var ledMenuItem: NSMenuItem?
+    private var launchAtStartupMenuItem: NSMenuItem?
     private var dockIconMenuItem: NSMenuItem?
     private var audioController: AudioController!
     private var powerMate: PowerMateDevice!
@@ -54,7 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DiagnosticsLog.write("launch begin")
-        NSApp.setActivationPolicy(.regular)
+        loadDockIconPreference()
+        applyDockIconVisibility()
 
         guard ensureSingleInstance() else {
             DiagnosticsLog.write("exiting because another instance is already running")
@@ -188,6 +195,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.mainMenu = NSMenu()
     }
 
+    private func loadDockIconPreference() {
+        guard UserDefaults.standard.object(forKey: DefaultsKey.dockIconVisible) != nil else {
+            isDockIconVisible = true
+            return
+        }
+
+        isDockIconVisible = UserDefaults.standard.bool(forKey: DefaultsKey.dockIconVisible)
+    }
+
+    private func persistDockIconPreference() {
+        UserDefaults.standard.set(isDockIconVisible, forKey: DefaultsKey.dockIconVisible)
+    }
+
+    private func applyDockIconVisibility() {
+        NSApp.setActivationPolicy(isDockIconVisible ? .regular : .accessory)
+    }
+
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
@@ -218,6 +242,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ].compactMap { $0 }.forEach(menu.addItem)
 
         menu.addItem(.separator())
+        launchAtStartupMenuItem = NSMenuItem(title: "Launch on Startup", action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
+        menu.addItem(launchAtStartupMenuItem!)
         dockIconMenuItem = NSMenuItem(title: "Hide Dock Icon", action: #selector(toggleDockIcon), keyEquivalent: "")
         menu.addItem(dockIconMenuItem!)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
@@ -329,6 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             audioController.isMuted() ? "muted" : "not muted"
         )
         ledMenuItem?.title = "LED: \(ledStatus)"
+        updateLaunchAtStartupMenuItem()
         dockIconMenuItem?.title = isDockIconVisible ? "Hide Dock Icon" : "Show Dock Icon"
 
         let diagnosticsLine = [
@@ -348,11 +375,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleDockIcon() {
         isDockIconVisible.toggle()
-        NSApp.setActivationPolicy(isDockIconVisible ? .regular : .accessory)
+        persistDockIconPreference()
+        applyDockIconVisibility()
         if isDockIconVisible {
             NSApp.activate(ignoringOtherApps: true)
         }
         updateDiagnosticsMenu()
+    }
+
+    @objc private func toggleLaunchAtStartup() {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+                DiagnosticsLog.write("launch at startup disabled")
+            } else {
+                try SMAppService.mainApp.register()
+                DiagnosticsLog.write("launch at startup enabled")
+            }
+        } catch {
+            DiagnosticsLog.write("launch at startup toggle failed: \(error.localizedDescription)")
+            showLaunchAtStartupError(error)
+        }
+
+        updateDiagnosticsMenu()
+    }
+
+    private func updateLaunchAtStartupMenuItem() {
+        guard let launchAtStartupMenuItem else { return }
+
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchAtStartupMenuItem.title = "Launch on Startup"
+            launchAtStartupMenuItem.state = .on
+        case .requiresApproval:
+            launchAtStartupMenuItem.title = "Launch on Startup (Approval Required)"
+            launchAtStartupMenuItem.state = .mixed
+        default:
+            launchAtStartupMenuItem.title = "Launch on Startup"
+            launchAtStartupMenuItem.state = .off
+        }
+    }
+
+    private func showLaunchAtStartupError(_ error: Error) {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Could not update Launch on Startup"
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func quit() {
