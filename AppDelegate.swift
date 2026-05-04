@@ -34,8 +34,6 @@ private enum PowerMateMGGMain {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
-    private var window: NSWindow?
-    private var diagnosticLabels: [String: NSTextField] = [:]
     private var statusRefreshTimer: Timer?
     private var lastDiagnosticsLogLine = ""
     private var connectionMenuItem: NSMenuItem?
@@ -44,9 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var eventsMenuItem: NSMenuItem?
     private var audioMenuItem: NSMenuItem?
     private var ledMenuItem: NSMenuItem?
+    private var dockIconMenuItem: NSMenuItem?
     private var audioController: AudioController!
     private var powerMate: PowerMateDevice!
     private var isConnected = false
+    private var isDockIconVisible = true
     private var rotateCount = 0
     private var buttonCount = 0
     private var currentHIDStatus = PowerMateDeviceStatus()
@@ -62,9 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        installMainMenu()
+        removeMainMenu()
         installStatusItem()
-        installDiagnosticsWindow()
 
         switch handleOriginalPowerMateIfNeeded() {
         case .continueLaunching:
@@ -93,17 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         powerMate.start()
         refreshLED()
         startStatusRefreshTimer()
-        NSApp.activate(ignoringOtherApps: true)
-        showDiagnostics()
         DiagnosticsLog.write("launch complete")
     }
 
-    func applicationDidBecomeActive(_ notification: Notification) {
-        showDiagnostics()
-    }
-
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showDiagnostics()
         return true
     }
 
@@ -192,26 +184,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func installMainMenu() {
-        let mainMenu = NSMenu()
-        let appMenuItem = NSMenuItem()
-        mainMenu.addItem(appMenuItem)
-
-        let appMenu = NSMenu(title: "PowerMateMGG")
-        appMenu.addItem(NSMenuItem(title: "Show Diagnostics", action: #selector(showDiagnostics), keyEquivalent: "d"))
-        appMenu.addItem(.separator())
-        appMenu.addItem(NSMenuItem(title: "Quit PowerMateMGG", action: #selector(quit), keyEquivalent: "q"))
-        appMenuItem.submenu = appMenu
-
-        NSApp.mainMenu = mainMenu
+    private func removeMainMenu() {
+        NSApp.mainMenu = NSMenu()
     }
 
     private func installStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.title = "PowerMate"
-            button.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "PowerMate")
-            button.imagePosition = .imageLeading
+            button.title = ""
+            button.image = makeStatusBarIcon()
+            button.imagePosition = .imageOnly
             button.toolTip = "PowerMateMGG"
         }
 
@@ -236,9 +218,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ].compactMap { $0 }.forEach(menu.addItem)
 
         menu.addItem(.separator())
+        dockIconMenuItem = NSMenuItem(title: "Hide Dock Icon", action: #selector(toggleDockIcon), keyEquivalent: "")
+        menu.addItem(dockIconMenuItem!)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
         statusItem = item
+    }
+
+    private func makeStatusBarIcon() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        NSColor.white.setFill()
+        NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+
+        NSColor(calibratedRed: 0.08, green: 0.38, blue: 0.95, alpha: 1.0).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 3, y: 3, width: 12, height: 12)).fill()
+
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -247,64 +247,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func startStatusRefreshTimer() {
         statusRefreshTimer?.invalidate()
-        statusRefreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.refreshRealtimeStatus()
         }
-        statusRefreshTimer?.tolerance = 0.1
-    }
-
-    private func installDiagnosticsWindow() {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 300),
-            styleMask: [.titled, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "PowerMateMGG Diagnostics"
-        window.center()
-        window.isReleasedWhenClosed = false
-        window.level = .floating
-        window.collectionBehavior = [.moveToActiveSpace]
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        let title = NSTextField(labelWithString: "PowerMateMGG")
-        title.font = .boldSystemFont(ofSize: 20)
-        stack.addArrangedSubview(title)
-
-        [
-            ("device", "Device: starting"),
-            ("hid", "HID open: not started"),
-            ("report", "Last report: none"),
-            ("events", "Events: 0 rotations, 0 buttons"),
-            ("audio", "Audio: starting"),
-            ("led", "LED: not sent")
-        ].forEach { key, text in
-            let label = NSTextField(labelWithString: text)
-            label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-            label.lineBreakMode = .byTruncatingMiddle
-            diagnosticLabels[key] = label
-            stack.addArrangedSubview(label)
-        }
-
-        let quitButton = NSButton(title: "Quit", target: self, action: #selector(quit))
-        stack.addArrangedSubview(quitButton)
-
-        let contentView = NSView()
-        contentView.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 22),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -22),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 22)
-        ])
-        window.contentView = contentView
-        self.window = window
-        showDiagnostics()
-        DiagnosticsLog.write("diagnostics window installed")
+        timer.tolerance = 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        statusRefreshTimer = timer
     }
 
     private func handleRotation(_ delta: Int) {
@@ -356,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateStatusTitle(connected: Bool) {
         DispatchQueue.main.async { [weak self] in
             self?.isConnected = connected
-            self?.statusItem?.button?.title = connected ? "PowerMate" : "PowerMate?"
+            self?.statusItem?.button?.toolTip = connected ? "PowerMateMGG: connected" : "PowerMateMGG: not connected"
             self?.updateDiagnosticsMenu()
         }
     }
@@ -381,13 +329,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             audioController.isMuted() ? "muted" : "not muted"
         )
         ledMenuItem?.title = "LED: \(ledStatus)"
-
-        diagnosticLabels["device"]?.stringValue = connectionMenuItem?.title ?? "Device: unknown"
-        diagnosticLabels["hid"]?.stringValue = hidOpenMenuItem?.title ?? "HID open: unknown"
-        diagnosticLabels["report"]?.stringValue = reportMenuItem?.title ?? "Last report: unknown"
-        diagnosticLabels["events"]?.stringValue = eventsMenuItem?.title ?? "Events: unknown"
-        diagnosticLabels["audio"]?.stringValue = audioMenuItem?.title ?? "Audio: unknown"
-        diagnosticLabels["led"]?.stringValue = ledMenuItem?.title ?? "LED: unknown"
+        dockIconMenuItem?.title = isDockIconVisible ? "Hide Dock Icon" : "Show Dock Icon"
 
         let diagnosticsLine = [
             connectionMenuItem?.title,
@@ -404,11 +346,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func showDiagnostics() {
-        guard let window else { return }
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
+    @objc private func toggleDockIcon() {
+        isDockIconVisible.toggle()
+        NSApp.setActivationPolicy(isDockIconVisible ? .regular : .accessory)
+        if isDockIconVisible {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        updateDiagnosticsMenu()
     }
 
     @objc private func quit() {

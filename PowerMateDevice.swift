@@ -76,7 +76,7 @@ final class PowerMateDevice {
             context
         )
 
-        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.manager = manager
 
@@ -87,7 +87,7 @@ final class PowerMateDevice {
 
     func stop() {
         if let manager {
-            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         }
         reportRegistrations.removeAll()
@@ -140,16 +140,14 @@ final class PowerMateDevice {
 
         let buttonDown = report[0] != 0
         if buttonDown && !previousButtonDown {
-            DispatchQueue.main.async { [onButtonPress] in
-                onButtonPress()
-            }
+            callOnMain(onButtonPress)
         }
         previousButtonDown = buttonDown
 
         let delta = Int(Int8(bitPattern: report[1]))
         guard delta != 0 else { return }
 
-        DispatchQueue.main.async { [onRotate] in
+        callOnMain { [onRotate] in
             onRotate(delta)
         }
     }
@@ -162,8 +160,16 @@ final class PowerMateDevice {
 
     private func publishStatus() {
         let status = self.status
-        DispatchQueue.main.async { [onStatusChanged] in
+        callOnMain { [onStatusChanged] in
             onStatusChanged(status)
+        }
+    }
+
+    private func callOnMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.async(execute: work)
         }
     }
 
