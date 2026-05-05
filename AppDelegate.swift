@@ -3,24 +3,24 @@ import ServiceManagement
 
 private var powerMateAppDelegate: AppDelegate?
 
-private enum DefaultsKey {
-    static let dockIconVisible = "dockIconVisible"
-}
-
 private enum DiagnosticsLog {
-    static let path = "/tmp/PowerMateMGG.log"
+    private static var logURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("PowerMateMGG.log")
+    }
 
     static func write(_ message: String) {
         let line = "\(Date()) \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
+        guard let logURL else { return }
 
-        if FileManager.default.fileExists(atPath: path) == false {
-            FileManager.default.createFile(atPath: path, contents: nil)
+        if FileManager.default.fileExists(atPath: logURL.path) == false {
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
         }
 
-        guard let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: path)) else { return }
+        guard let handle = try? FileHandle(forWritingTo: logURL) else { return }
         defer { try? handle.close() }
-        try? handle.seekToEnd()
+        _ = try? handle.seekToEnd()
         try? handle.write(contentsOf: data)
     }
 }
@@ -51,11 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var audioMenuItem: NSMenuItem?
     private var ledMenuItem: NSMenuItem?
     private var launchAtStartupMenuItem: NSMenuItem?
-    private var dockIconMenuItem: NSMenuItem?
     private var audioController: AudioController!
     private var powerMate: PowerMateDevice!
     private var isConnected = false
-    private var isDockIconVisible = true
     private var rotateCount = 0
     private var buttonCount = 0
     private var currentHIDStatus = PowerMateDeviceStatus()
@@ -65,8 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DiagnosticsLog.write("launch begin")
-        loadDockIconPreference()
-        applyDockIconVisibility()
+        NSApp.setActivationPolicy(.accessory)
 
         guard ensureSingleInstance() else {
             DiagnosticsLog.write("exiting because another instance is already running")
@@ -135,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func handleOriginalPowerMateIfNeeded() -> LaunchDecision {
-        guard let originalApp = findOriginalPowerMateApp() else {
+        guard findOriginalPowerMateApp() != nil else {
             return .continueLaunching
         }
 
@@ -143,23 +140,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "PowerMate.app is already running"
-        alert.informativeText = """
-        The original Griffin PowerMate app may already have access to the PowerMate hardware. Close it before starting PowerMateMGG, or continue anyway if you want to try launching both.
-        """
-        alert.addButton(withTitle: "Quit PowerMate.app and Continue")
-        alert.addButton(withTitle: "Continue Anyway")
+        alert.messageText = "The original PowerMate is currently running. Please quit the original PowerMate and re-launch PowerMateMGG."
         alert.addButton(withTitle: "Quit PowerMateMGG")
 
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            quitOriginalPowerMateApp(originalApp)
-            return .continueLaunching
-        case .alertSecondButtonReturn:
-            return .continueLaunching
-        default:
-            return .quitThisApp
-        }
+        alert.runModal()
+        return .quitThisApp
     }
 
     private func findOriginalPowerMateApp() -> NSRunningApplication? {
@@ -207,36 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    private func quitOriginalPowerMateApp(_ app: NSRunningApplication) {
-        guard app.isTerminated == false else { return }
-
-        app.terminate()
-
-        let deadline = Date().addingTimeInterval(3.0)
-        while app.isTerminated == false && Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
-        }
-    }
-
     private func removeMainMenu() {
         NSApp.mainMenu = NSMenu()
-    }
-
-    private func loadDockIconPreference() {
-        guard UserDefaults.standard.object(forKey: DefaultsKey.dockIconVisible) != nil else {
-            isDockIconVisible = true
-            return
-        }
-
-        isDockIconVisible = UserDefaults.standard.bool(forKey: DefaultsKey.dockIconVisible)
-    }
-
-    private func persistDockIconPreference() {
-        UserDefaults.standard.set(isDockIconVisible, forKey: DefaultsKey.dockIconVisible)
-    }
-
-    private func applyDockIconVisibility() {
-        NSApp.setActivationPolicy(isDockIconVisible ? .regular : .accessory)
     }
 
     private func installStatusItem() {
@@ -271,8 +228,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         launchAtStartupMenuItem = NSMenuItem(title: "Launch on Startup", action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
         menu.addItem(launchAtStartupMenuItem!)
-        dockIconMenuItem = NSMenuItem(title: "Hide Dock Icon", action: #selector(toggleDockIcon), keyEquivalent: "")
-        menu.addItem(dockIconMenuItem!)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
         statusItem = item
@@ -284,11 +239,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let image = NSImage(size: size)
         image.lockFocus()
 
-        NSColor.white.setFill()
-        NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+        NSColor.white.setStroke()
 
-        NSColor(calibratedRed: 0.08, green: 0.38, blue: 0.95, alpha: 1.0).setFill()
-        NSBezierPath(ovalIn: NSRect(x: 3, y: 3, width: 12, height: 12)).fill()
+        let base = NSBezierPath()
+        base.move(to: NSPoint(x: 2.0, y: 4.1))
+        base.curve(
+            to: NSPoint(x: 16.0, y: 4.1),
+            controlPoint1: NSPoint(x: 2.0, y: 1.4),
+            controlPoint2: NSPoint(x: 16.0, y: 1.4)
+        )
+        base.lineWidth = 1.4
+        base.lineCapStyle = .round
+        base.stroke()
+
+        let glowRing = NSBezierPath()
+        glowRing.move(to: NSPoint(x: 3.4, y: 4.0))
+        glowRing.curve(
+            to: NSPoint(x: 14.6, y: 4.0),
+            controlPoint1: NSPoint(x: 6.2, y: 2.7),
+            controlPoint2: NSPoint(x: 11.8, y: 2.7)
+        )
+        glowRing.lineWidth = 1.2
+        glowRing.lineCapStyle = .round
+        glowRing.stroke()
+
+        let leftSide = NSBezierPath()
+        leftSide.move(to: NSPoint(x: 4.6, y: 5.0))
+        leftSide.line(to: NSPoint(x: 5.2, y: 10.6))
+        leftSide.lineWidth = 1.45
+        leftSide.lineCapStyle = .round
+        leftSide.stroke()
+
+        let rightSide = NSBezierPath()
+        rightSide.move(to: NSPoint(x: 13.4, y: 5.0))
+        rightSide.line(to: NSPoint(x: 12.8, y: 10.6))
+        rightSide.lineWidth = 1.45
+        rightSide.lineCapStyle = .round
+        rightSide.stroke()
+
+        let top = NSBezierPath(ovalIn: NSRect(x: 5.0, y: 10.2, width: 8.0, height: 4.1))
+        top.lineWidth = 1.35
+        top.stroke()
 
         image.unlockFocus()
         image.isTemplate = false
@@ -415,7 +406,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             audioController.isMuted() ? "muted" : "not muted"
         )
         ledMenuItem?.title = "LED: \(ledStatus)"
-        dockIconMenuItem?.title = isDockIconVisible ? "Hide Dock Icon" : "Show Dock Icon"
 
         let diagnosticsLine = [
             connectionMenuItem?.title,
@@ -430,16 +420,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lastDiagnosticsLogLine = diagnosticsLine
             DiagnosticsLog.write(diagnosticsLine)
         }
-    }
-
-    @objc private func toggleDockIcon() {
-        isDockIconVisible.toggle()
-        persistDockIconPreference()
-        applyDockIconVisibility()
-        if isDockIconVisible {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        updateDiagnosticsMenu()
     }
 
     @objc private func toggleLaunchAtStartup() {
