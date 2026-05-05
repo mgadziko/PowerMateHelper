@@ -548,43 +548,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func makeMuteOverlayImage(isMuted: Bool) -> NSImage? {
-        let symbolName = isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
-        return makeSpeakerOverlayImage(symbolName: symbolName)
+        isMuted ? makeSpeakerOverlayImage(cacheKey: "mute", waveCount: 0, isMuted: true)
+            : makeSpeakerOverlayImage(cacheKey: "waves-2", waveCount: 2, isMuted: false)
     }
 
     private func makeVolumeOverlayImage(volume: Float) -> NSImage? {
         let clampedVolume = max(0.0, min(1.0, volume))
-        let symbolName: String
+        let cacheKey: String
+        let waveCount: Int
+        let isMuted: Bool
 
         switch clampedVolume {
         case ...0.0:
-            symbolName = "speaker.slash.fill"
+            cacheKey = "mute"
+            waveCount = 0
+            isMuted = true
         case ...0.33:
-            symbolName = "speaker.wave.1.fill"
+            cacheKey = "waves-1"
+            waveCount = 1
+            isMuted = false
         case ...0.66:
-            symbolName = "speaker.wave.2.fill"
+            cacheKey = "waves-2"
+            waveCount = 2
+            isMuted = false
         default:
-            symbolName = "speaker.wave.3.fill"
+            cacheKey = "waves-3"
+            waveCount = 3
+            isMuted = false
         }
 
-        return makeSpeakerOverlayImage(symbolName: symbolName)
+        return makeSpeakerOverlayImage(cacheKey: cacheKey, waveCount: waveCount, isMuted: isMuted)
     }
 
-    private func makeSpeakerOverlayImage(symbolName: String) -> NSImage? {
-        if let cachedImage = ghostOverlayImages[symbolName] {
+    private func makeSpeakerOverlayImage(cacheKey: String, waveCount: Int, isMuted: Bool) -> NSImage? {
+        if let cachedImage = ghostOverlayImages[cacheKey] {
             return cachedImage
         }
 
-        let configuration = NSImage.SymbolConfiguration(pointSize: 150, weight: .regular)
-            .applying(.init(paletteColors: [.white]))
+        let size = NSSize(width: 190, height: 190)
+        let image = NSImage(size: size)
+        image.lockFocus()
 
-        guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else {
-            return nil
+        NSColor.white.setStroke()
+        NSColor.white.setFill()
+
+        let speakerBase = NSBezierPath(roundedRect: NSRect(x: 28, y: 76, width: 28, height: 38), xRadius: 3, yRadius: 3)
+        speakerBase.fill()
+
+        let speakerCone = NSBezierPath()
+        speakerCone.move(to: NSPoint(x: 58, y: 72))
+        speakerCone.line(to: NSPoint(x: 108, y: 34))
+        speakerCone.line(to: NSPoint(x: 108, y: 156))
+        speakerCone.line(to: NSPoint(x: 58, y: 118))
+        speakerCone.close()
+        speakerCone.fill()
+
+        if isMuted {
+            let circle = NSBezierPath(ovalIn: NSRect(x: 116, y: 62, width: 66, height: 66))
+            circle.lineWidth = 7
+            circle.stroke()
+
+            let slash = NSBezierPath()
+            slash.move(to: NSPoint(x: 128, y: 72))
+            slash.line(to: NSPoint(x: 170, y: 118))
+            slash.lineWidth = 8
+            slash.lineCapStyle = .round
+            slash.stroke()
+        } else {
+            let center = NSPoint(x: 108, y: 95)
+            let radii: [CGFloat] = [28, 46, 64]
+
+            for radius in radii.prefix(max(0, min(3, waveCount))) {
+                let wave = NSBezierPath()
+                wave.appendArc(withCenter: center, radius: radius, startAngle: -45, endAngle: 45, clockwise: false)
+                wave.lineWidth = 7
+                wave.lineCapStyle = .round
+                wave.stroke()
+            }
         }
-        image.isTemplate = false
-        let configuredImage = image.withSymbolConfiguration(configuration)
-        ghostOverlayImages[symbolName] = configuredImage
-        return configuredImage
+
+        image.unlockFocus()
+        ghostOverlayImages[cacheKey] = image
+        return image
     }
 
     private func hideGhostOverlay() {
