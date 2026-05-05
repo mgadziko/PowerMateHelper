@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusRefreshTimer: Timer?
     private var ghostOverlayWindow: NSWindow?
     private var ghostOverlayDismissTimer: Timer?
+    private var ghostOverlayImages: [String: NSImage] = [:]
     private var lastDiagnosticsLogLine = ""
     private var connectionMenuItem: NSMenuItem?
     private var hidOpenMenuItem: NSMenuItem?
@@ -59,6 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var buttonCount = 0
     private var currentHIDStatus = PowerMateDeviceStatus()
     private var ledStatus = "not sent"
+    private var lastSentLEDBrightness: UInt16?
+    private var didDisableLEDPulse = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DiagnosticsLog.write("launch begin")
@@ -101,7 +104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         powerMate.start()
         refreshLED()
-        startStatusRefreshTimer()
         DiagnosticsLog.write("launch complete")
     }
 
@@ -274,6 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
         statusItem = item
+        updateLaunchAtStartupMenuItem()
     }
 
     private func makeStatusBarIcon() -> NSImage {
@@ -294,6 +297,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         refreshRealtimeStatus()
+        startStatusRefreshTimer()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        stopStatusRefreshTimer()
     }
 
     private func startStatusRefreshTimer() {
@@ -306,29 +314,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusRefreshTimer = timer
     }
 
+    private func stopStatusRefreshTimer() {
+        statusRefreshTimer?.invalidate()
+        statusRefreshTimer = nil
+    }
+
     private func handleRotation(_ delta: Int) {
         guard delta != 0 else { return }
         rotateCount += 1
-        audioController.adjustVolume(by: Float(delta) * 0.025)
-        updateDiagnosticsMenu()
-        refreshLED()
-        showVolumeOverlay(volume: audioController.currentVolume())
+        let volume = audioController.adjustVolume(by: Float(delta) * 0.025)
+        refreshLED(volume: volume, muted: false)
+        showVolumeOverlay(volume: volume)
     }
 
     private func toggleMute() {
         buttonCount += 1
-        audioController.toggleMute()
-        updateDiagnosticsMenu()
-        refreshLED()
-        showMuteOverlay(isMuted: audioController.isMuted())
+        let muted = audioController.toggleMute()
+        refreshLED(volume: audioController.currentVolume(), muted: muted)
+        showMuteOverlay(isMuted: muted)
     }
 
     private func refreshLED() {
         let volume = audioController.currentVolume()
         let muted = audioController.isMuted()
+        refreshLED(volume: volume, muted: muted)
+    }
+
+    private func refreshLED(volume: Float, muted: Bool) {
         let brightness = muted ? 0.05 : max(0.05, min(1.0, Double(volume)))
-        let brightnessOK = PowerMateUSBLightController.setBrightness(brightness)
-        let pulseOK = PowerMateUSBLightController.setPulseEnabled(false)
+        let brightnessValue = UInt16((brightness * 255.0).rounded())
+
+        let brightnessOK: Bool
+        if lastSentLEDBrightness == brightnessValue {
+            brightnessOK = true
+        } else {
+            brightnessOK = PowerMateUSBLightController.setBrightness(brightness)
+            if brightnessOK {
+                lastSentLEDBrightness = brightnessValue
+            }
+        }
+
+        let pulseOK: Bool
+        if didDisableLEDPulse {
+            pulseOK = true
+        } else {
+            pulseOK = PowerMateUSBLightController.setPulseEnabled(false)
+            didDisableLEDPulse = pulseOK
+        }
+
         ledStatus = String(
             format: "brightness %.0f%%, %@",
             brightness * 100.0,
@@ -382,7 +415,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             audioController.isMuted() ? "muted" : "not muted"
         )
         ledMenuItem?.title = "LED: \(ledStatus)"
-        updateLaunchAtStartupMenuItem()
         dockIconMenuItem?.title = isDockIconVisible ? "Hide Dock Icon" : "Show Dock Icon"
 
         let diagnosticsLine = [
@@ -424,6 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             showLaunchAtStartupError(error)
         }
 
+        updateLaunchAtStartupMenuItem()
         updateDiagnosticsMenu()
     }
 
@@ -476,9 +509,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.alphaValue = 1.0
         window.orderFrontRegardless()
 
-        ghostOverlayDismissTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+        let dismissTimer = Timer(timeInterval: duration, repeats: false) { [weak self] _ in
             self?.hideGhostOverlay()
         }
+        RunLoop.main.add(dismissTimer, forMode: .common)
+        ghostOverlayDismissTimer = dismissTimer
     }
 
     private func makeGhostOverlayWindow() -> NSWindow {
@@ -536,6 +571,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func makeSpeakerOverlayImage(symbolName: String) -> NSImage? {
+        if let cachedImage = ghostOverlayImages[symbolName] {
+            return cachedImage
+        }
+
         let configuration = NSImage.SymbolConfiguration(pointSize: 150, weight: .regular)
             .applying(.init(paletteColors: [.white]))
 
@@ -543,7 +582,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return nil
         }
         image.isTemplate = false
-        return image.withSymbolConfiguration(configuration)
+        let configuredImage = image.withSymbolConfiguration(configuration)
+        ghostOverlayImages[symbolName] = configuredImage
+        return configuredImage
     }
 
     private func hideGhostOverlay() {

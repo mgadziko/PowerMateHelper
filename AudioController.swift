@@ -33,22 +33,26 @@ final class AudioController {
         return (left + right) / 2
     }
 
-    func adjustVolume(by delta: Float) {
-        setVolume(currentVolume() + delta)
-        if currentVolume() > 0 {
+    @discardableResult
+    func adjustVolume(by delta: Float) -> Float {
+        let volume = setVolume(currentVolume() + delta)
+        if volume > 0 {
             setMuted(false)
         }
+        return volume
     }
 
-    func setVolume(_ volume: Float) {
+    @discardableResult
+    func setVolume(_ volume: Float) -> Float {
         let clamped = max(0, min(1, volume))
 
         if setVolume(clamped, element: kAudioObjectPropertyElementMain) {
-            return
+            return clamped
         }
 
         _ = setVolume(clamped, element: 1)
         _ = setVolume(clamped, element: 2)
+        return clamped
     }
 
     func isMuted() -> Bool {
@@ -64,8 +68,11 @@ final class AudioController {
         return status == noErr && muted != 0
     }
 
-    func toggleMute() {
-        setMuted(!isMuted())
+    @discardableResult
+    func toggleMute() -> Bool {
+        let muted = !isMuted()
+        setMuted(muted)
+        return muted
     }
 
     private func setMuted(_ muted: Bool) {
