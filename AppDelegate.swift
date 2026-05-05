@@ -6,7 +6,7 @@ private var powerMateAppDelegate: AppDelegate?
 private enum DiagnosticsLog {
     private static var logURL: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("PowerMateMGG.log")
+            .appendingPathComponent("PowerMate Helper.log")
     }
 
     static func write(_ message: String) {
@@ -140,8 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "The original PowerMate is currently running. Please quit the original PowerMate and re-launch PowerMateMGG."
-        alert.addButton(withTitle: "Quit PowerMateMGG")
+        alert.messageText = "The original PowerMate is currently running. Please quit the original PowerMate and re-launch PowerMate Helper."
+        alert.addButton(withTitle: "Quit PowerMate Helper")
 
         alert.runModal()
         return .quitThisApp
@@ -162,6 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         guard bundleIdentifier != Bundle.main.bundleIdentifier?.lowercased(),
               appName != "powermatemgg",
+              appName != "powermate helper",
               bundlePath.hasSuffix("/powermatemgg.app") == false else {
             return false
         }
@@ -188,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let appName = app.localizedName ?? "PowerMate.app"
-        DiagnosticsLog.write("\(appName) launched; quitting PowerMateMGG")
+        DiagnosticsLog.write("\(appName) launched; quitting PowerMate Helper")
         NSApp.terminate(nil)
     }
 
@@ -202,12 +203,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.title = ""
             button.image = makeStatusBarIcon()
             button.imagePosition = .imageOnly
-            button.toolTip = "PowerMateMGG"
+            button.toolTip = "PowerMate Helper"
         }
 
         let menu = NSMenu()
         menu.delegate = self
-        menu.addItem(NSMenuItem(title: "PowerMateMGG", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "PowerMate Helper", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
         connectionMenuItem = NSMenuItem(title: "Device: starting", action: nil, keyEquivalent: "")
         hidOpenMenuItem = NSMenuItem(title: "HID open: not started", action: nil, keyEquivalent: "")
@@ -228,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         launchAtStartupMenuItem = NSMenuItem(title: "Launch on Startup", action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
         menu.addItem(launchAtStartupMenuItem!)
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: ""))
         item.menu = menu
         statusItem = item
         updateLaunchAtStartupMenuItem()
@@ -265,19 +266,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let leftSide = NSBezierPath()
         leftSide.move(to: NSPoint(x: 4.6, y: 5.0))
-        leftSide.line(to: NSPoint(x: 5.2, y: 10.6))
+        leftSide.line(to: NSPoint(x: 5.2, y: 8.2))
         leftSide.lineWidth = 1.45
         leftSide.lineCapStyle = .round
         leftSide.stroke()
 
         let rightSide = NSBezierPath()
         rightSide.move(to: NSPoint(x: 13.4, y: 5.0))
-        rightSide.line(to: NSPoint(x: 12.8, y: 10.6))
+        rightSide.line(to: NSPoint(x: 12.8, y: 8.2))
         rightSide.lineWidth = 1.45
         rightSide.lineCapStyle = .round
         rightSide.stroke()
 
-        let top = NSBezierPath(ovalIn: NSRect(x: 5.0, y: 10.2, width: 8.0, height: 4.1))
+        let top = NSBezierPath(ovalIn: NSRect(x: 5.0, y: 7.8, width: 8.0, height: 2.7))
         top.lineWidth = 1.35
         top.stroke()
 
@@ -381,7 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateStatusTitle(connected: Bool) {
         DispatchQueue.main.async { [weak self] in
             self?.isConnected = connected
-            self?.statusItem?.button?.toolTip = connected ? "PowerMateMGG: connected" : "PowerMateMGG: not connected"
+            self?.statusItem?.button?.toolTip = connected ? "PowerMate Helper: connected" : "PowerMate Helper: not connected"
             self?.updateDiagnosticsMenu()
         }
     }
