@@ -36,20 +36,37 @@ static const SInt32 PMProductID = 0x0410;
 + (BOOL)sendCommand:(UInt16)command value:(UInt16)value
 {
     io_iterator_t iterator = IO_OBJECT_NULL;
-    IOUSBDeviceInterface **device = [self copyFirstPowerMateUSBDeviceWithIterator:&iterator];
-    if (device == NULL) {
-        if (iterator != IO_OBJECT_NULL) {
-            IOObjectRelease(iterator);
-        }
+    if (![self copyPowerMateUSBDeviceIterator:&iterator]) {
         return NO;
     }
 
+    BOOL sentToAnyDevice = NO;
+    BOOL allRequestsSucceeded = YES;
+
+    io_service_t service = IOIteratorNext(iterator);
+    while (service != IO_OBJECT_NULL) {
+        IOUSBDeviceInterface **device = [self copyUSBDeviceInterfaceForService:service];
+        IOObjectRelease(service);
+
+        if (device != NULL) {
+            BOOL commandSucceeded = [self sendCommand:command value:value toDevice:device];
+            sentToAnyDevice = YES;
+            allRequestsSucceeded = allRequestsSucceeded && commandSucceeded;
+            (*device)->Release(device);
+        }
+
+        service = IOIteratorNext(iterator);
+    }
+
+    IOObjectRelease(iterator);
+
+    return sentToAnyDevice && allRequestsSucceeded;
+}
+
++ (BOOL)sendCommand:(UInt16)command value:(UInt16)value toDevice:(IOUSBDeviceInterface **)device
+{
     IOReturn openResult = (*device)->USBDeviceOpen(device);
     if (openResult != kIOReturnSuccess && openResult != kIOReturnExclusiveAccess) {
-        (*device)->Release(device);
-        if (iterator != IO_OBJECT_NULL) {
-            IOObjectRelease(iterator);
-        }
         return NO;
     }
 
@@ -67,20 +84,15 @@ static const SInt32 PMProductID = 0x0410;
     if (openResult == kIOReturnSuccess) {
         (*device)->USBDeviceClose(device);
     }
-    (*device)->Release(device);
-
-    if (iterator != IO_OBJECT_NULL) {
-        IOObjectRelease(iterator);
-    }
 
     return requestResult == kIOReturnSuccess;
 }
 
-+ (IOUSBDeviceInterface **)copyFirstPowerMateUSBDeviceWithIterator:(io_iterator_t *)iterator
++ (BOOL)copyPowerMateUSBDeviceIterator:(io_iterator_t *)iterator
 {
     CFMutableDictionaryRef matching = IOServiceMatching(kIOUSBDeviceClassName);
     if (matching == NULL) {
-        return NULL;
+        return NO;
     }
 
     CFNumberRef vendor = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &PMVendorID);
@@ -92,22 +104,10 @@ static const SInt32 PMProductID = 0x0410;
 
     IOReturn result = IOServiceGetMatchingServices(kIOMainPortDefault, matching, iterator);
     if (result != kIOReturnSuccess) {
-        return NULL;
+        return NO;
     }
 
-    io_service_t service = IOIteratorNext(*iterator);
-    while (service != IO_OBJECT_NULL) {
-        IOUSBDeviceInterface **device = [self copyUSBDeviceInterfaceForService:service];
-        IOObjectRelease(service);
-
-        if (device != NULL) {
-            return device;
-        }
-
-        service = IOIteratorNext(*iterator);
-    }
-
-    return NULL;
+    return YES;
 }
 
 + (IOUSBDeviceInterface **)copyUSBDeviceInterfaceForService:(io_service_t)service
