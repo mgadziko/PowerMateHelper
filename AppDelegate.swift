@@ -71,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         removeMainMenu()
         installStatusItem()
+        startOriginalPowerMateLaunchObserver()
 
         switch handleOriginalPowerMateIfNeeded() {
         case .continueLaunching:
@@ -158,26 +159,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func findOriginalPowerMateApp() -> NSRunningApplication? {
-        NSWorkspace.shared.runningApplications.first { app in
-            guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
-                return false
-            }
+        NSWorkspace.shared.runningApplications.first(where: isOriginalPowerMateApp)
+    }
 
-            let bundleIdentifier = app.bundleIdentifier?.lowercased() ?? ""
-            let appName = app.localizedName?.lowercased() ?? ""
-            let bundlePath = app.bundleURL?.path.lowercased() ?? ""
-
-            guard bundleIdentifier != Bundle.main.bundleIdentifier?.lowercased(),
-                  appName != "powermatemgg",
-                  bundlePath.hasSuffix("/powermatemgg.app") == false else {
-                return false
-            }
-
-            return bundleIdentifier == "com.griffintechnology.powermate"
-                || bundleIdentifier == "com.griffintechnology.powermateapp"
-                || appName == "powermate"
-                || bundlePath.hasSuffix("/powermate.app")
+    private func isOriginalPowerMateApp(_ app: NSRunningApplication) -> Bool {
+        guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            return false
         }
+
+        let bundleIdentifier = app.bundleIdentifier?.lowercased() ?? ""
+        let appName = app.localizedName?.lowercased() ?? ""
+        let bundlePath = app.bundleURL?.path.lowercased() ?? ""
+
+        guard bundleIdentifier != Bundle.main.bundleIdentifier?.lowercased(),
+              appName != "powermatemgg",
+              bundlePath.hasSuffix("/powermatemgg.app") == false else {
+            return false
+        }
+
+        return bundleIdentifier == "com.griffintechnology.powermate"
+            || bundleIdentifier == "com.griffintechnology.powermateapp"
+            || appName == "powermate"
+            || bundlePath.hasSuffix("/powermate.app")
+    }
+
+    private func startOriginalPowerMateLaunchObserver() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleApplicationDidLaunch(_:)),
+            name: NSWorkspace.didLaunchApplicationNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleApplicationDidLaunch(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              isOriginalPowerMateApp(app) else {
+            return
+        }
+
+        let appName = app.localizedName ?? "PowerMate.app"
+        DiagnosticsLog.write("\(appName) launched; quitting PowerMateMGG")
+        NSApp.terminate(nil)
     }
 
     private func quitOriginalPowerMateApp(_ app: NSRunningApplication) {
