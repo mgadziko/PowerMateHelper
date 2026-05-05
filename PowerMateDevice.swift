@@ -6,6 +6,7 @@ struct PowerMateDeviceStatus {
     var openResult = "not started"
     var deviceCount = 0
     var reportCount = 0
+    var debouncedButtonPressCount = 0
     var lastReport = "none"
 }
 
@@ -13,9 +14,11 @@ final class PowerMateDevice {
     private let vendorID = 0x077d
     private let productID = 0x0410
     private let reportLength = 6
+    private let buttonDebounceInterval: TimeInterval = 0.25
 
     private var manager: IOHIDManager?
     private var previousButtonDown = false
+    private var lastAcceptedButtonPressTime = -Double.infinity
     private var status = PowerMateDeviceStatus()
     private var reportRegistrations: [Int: ReportRegistration] = [:]
 
@@ -140,7 +143,14 @@ final class PowerMateDevice {
 
         let buttonDown = report[0] != 0
         if buttonDown && !previousButtonDown {
-            callOnMain(onButtonPress)
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - lastAcceptedButtonPressTime >= buttonDebounceInterval {
+                lastAcceptedButtonPressTime = now
+                callOnMain(onButtonPress)
+            } else {
+                status.debouncedButtonPressCount += 1
+                publishStatus()
+            }
         }
         previousButtonDown = buttonDown
 

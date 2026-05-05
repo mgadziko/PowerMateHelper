@@ -40,6 +40,8 @@ private enum PowerMateMGGMain {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var statusRefreshTimer: Timer?
+    private var ghostOverlayWindow: NSWindow?
+    private var ghostOverlayDismissTimer: Timer?
     private var lastDiagnosticsLogLine = ""
     private var connectionMenuItem: NSMenuItem?
     private var hidOpenMenuItem: NSMenuItem?
@@ -310,6 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         audioController.adjustVolume(by: Float(delta) * 0.025)
         updateDiagnosticsMenu()
         refreshLED()
+        showVolumeOverlay(volume: audioController.currentVolume())
     }
 
     private func toggleMute() {
@@ -317,6 +320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         audioController.toggleMute()
         updateDiagnosticsMenu()
         refreshLED()
+        showMuteOverlay(isMuted: audioController.isMuted())
     }
 
     private func refreshLED() {
@@ -371,7 +375,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             : "Device: not connected (\(currentHIDStatus.deviceCount) matched)"
         hidOpenMenuItem?.title = "HID open: \(currentHIDStatus.openResult)"
         reportMenuItem?.title = "Last report: \(currentHIDStatus.lastReport)"
-        eventsMenuItem?.title = "Events: \(rotateCount) rotations, \(buttonCount) buttons"
+        eventsMenuItem?.title = "Events: \(rotateCount) rotations, \(buttonCount) buttons, \(currentHIDStatus.debouncedButtonPressCount) bounce ignored"
         audioMenuItem?.title = String(
             format: "Audio: volume %.0f%%, %@",
             audioController.currentVolume() * 100.0,
@@ -448,6 +452,104 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = error.localizedDescription
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    private func showMuteOverlay(isMuted: Bool) {
+        showGhostOverlay(image: makeMuteOverlayImage(isMuted: isMuted), duration: 2.0)
+    }
+
+    private func showVolumeOverlay(volume: Float) {
+        showGhostOverlay(image: makeVolumeOverlayImage(volume: volume), duration: 0.5)
+    }
+
+    private func showGhostOverlay(image: NSImage?, duration: TimeInterval) {
+        ghostOverlayDismissTimer?.invalidate()
+
+        let window = ghostOverlayWindow ?? makeGhostOverlayWindow()
+        ghostOverlayWindow = window
+
+        if let imageView = window.contentView as? NSImageView {
+            imageView.image = image
+        }
+
+        centerGhostOverlayWindow(window)
+        window.alphaValue = 1.0
+        window.orderFrontRegardless()
+
+        ghostOverlayDismissTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+            self?.hideGhostOverlay()
+        }
+    }
+
+    private func makeGhostOverlayWindow() -> NSWindow {
+        let size = NSSize(width: 190, height: 190)
+        let imageView = NSImageView(frame: NSRect(origin: .zero, size: size))
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.backgroundColor = .clear
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        window.contentView = imageView
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.isOpaque = false
+        window.level = .screenSaver
+        return window
+    }
+
+    private func centerGhostOverlayWindow(_ window: NSWindow) {
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSScreen.screens.first?.visibleFrame ?? .zero
+        let size = window.frame.size
+        let origin = NSPoint(
+            x: screenFrame.midX - size.width / 2.0,
+            y: screenFrame.midY - size.height / 2.0
+        )
+        window.setFrameOrigin(origin)
+    }
+
+    private func makeMuteOverlayImage(isMuted: Bool) -> NSImage? {
+        let symbolName = isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+        return makeSpeakerOverlayImage(symbolName: symbolName)
+    }
+
+    private func makeVolumeOverlayImage(volume: Float) -> NSImage? {
+        let clampedVolume = max(0.0, min(1.0, volume))
+        let symbolName: String
+
+        switch clampedVolume {
+        case ...0.0:
+            symbolName = "speaker.slash.fill"
+        case ...0.33:
+            symbolName = "speaker.wave.1.fill"
+        case ...0.66:
+            symbolName = "speaker.wave.2.fill"
+        default:
+            symbolName = "speaker.wave.3.fill"
+        }
+
+        return makeSpeakerOverlayImage(symbolName: symbolName)
+    }
+
+    private func makeSpeakerOverlayImage(symbolName: String) -> NSImage? {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 150, weight: .regular)
+            .applying(.init(paletteColors: [.white]))
+
+        guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else {
+            return nil
+        }
+        image.isTemplate = false
+        return image.withSymbolConfiguration(configuration)
+    }
+
+    private func hideGhostOverlay() {
+        ghostOverlayWindow?.orderOut(nil)
+        ghostOverlayDismissTimer?.invalidate()
+        ghostOverlayDismissTimer = nil
     }
 
     @objc private func quit() {
