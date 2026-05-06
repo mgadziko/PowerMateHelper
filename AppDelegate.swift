@@ -229,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         launchAtStartupMenuItem = NSMenuItem(title: "Launch on Startup", action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
         menu.addItem(launchAtStartupMenuItem!)
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Quit PowerMate Helper", action: #selector(quit), keyEquivalent: ""))
         item.menu = menu
         statusItem = item
         updateLaunchAtStartupMenuItem()
