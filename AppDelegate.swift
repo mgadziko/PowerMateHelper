@@ -570,11 +570,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let image = NSImage(size: size)
         image.lockFocus()
 
-        NSColor.white.setStroke()
-        NSColor.white.setFill()
+        let outlineColor = NSColor.black.withAlphaComponent(0.70)
+        let foregroundColor = NSColor.white
 
         let speakerBase = NSBezierPath(roundedRect: NSRect(x: 28, y: 76, width: 28, height: 38), xRadius: 3, yRadius: 3)
+        speakerBase.lineWidth = 5
+        foregroundColor.setFill()
         speakerBase.fill()
+        outlineColor.setStroke()
+        speakerBase.stroke()
 
         let speakerCone = NSBezierPath()
         speakerCone.move(to: NSPoint(x: 58, y: 72))
@@ -582,16 +586,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         speakerCone.line(to: NSPoint(x: 108, y: 156))
         speakerCone.line(to: NSPoint(x: 58, y: 118))
         speakerCone.close()
+        speakerCone.lineWidth = 5
+        foregroundColor.setFill()
         speakerCone.fill()
+        outlineColor.setStroke()
+        speakerCone.stroke()
 
         if isMuted {
             let circle = NSBezierPath(ovalIn: NSRect(x: 116, y: 62, width: 66, height: 66))
+            outlineColor.setStroke()
+            circle.lineWidth = 13
+            circle.stroke()
+            foregroundColor.setStroke()
             circle.lineWidth = 7
             circle.stroke()
 
             let slash = NSBezierPath()
             slash.move(to: NSPoint(x: 128, y: 72))
             slash.line(to: NSPoint(x: 170, y: 118))
+            outlineColor.setStroke()
+            slash.lineWidth = 14
+            slash.lineCapStyle = .round
+            slash.stroke()
+            foregroundColor.setStroke()
             slash.lineWidth = 8
             slash.lineCapStyle = .round
             slash.stroke()
@@ -602,6 +619,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             for radius in radii.prefix(max(0, min(3, waveCount))) {
                 let wave = NSBezierPath()
                 wave.appendArc(withCenter: center, radius: radius, startAngle: -45, endAngle: 45, clockwise: false)
+                outlineColor.setStroke()
+                wave.lineWidth = 13
+                wave.lineCapStyle = .round
+                wave.stroke()
+                foregroundColor.setStroke()
                 wave.lineWidth = 7
                 wave.lineCapStyle = .round
                 wave.stroke()
