@@ -26,7 +26,7 @@ private enum DiagnosticsLog {
 }
 
 @main
-private enum PowerMateMGGMain {
+private enum PowerMateHelperMain {
     static func main() {
         DiagnosticsLog.write("explicit main begin")
         let app = NSApplication.shared
@@ -333,7 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func refreshLED(volume: Float, muted: Bool) {
-        let brightness = muted ? 0.05 : max(0.05, min(1.0, Double(volume)))
+        let brightness = ledBrightness(volume: volume, muted: muted)
         let brightnessValue = UInt16((brightness * 255.0).rounded())
 
         let brightnessOK: Bool
@@ -371,12 +371,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateLEDStatusFromCurrentAudio() {
         let volume = audioController.currentVolume()
         let muted = audioController.isMuted()
-        let brightness = muted ? 0.05 : max(0.05, min(1.0, Double(volume)))
+        let brightness = ledBrightness(volume: volume, muted: muted)
         ledStatus = String(
             format: "brightness %.0f%%, %@",
             brightness * 100.0,
             "last set"
         )
+    }
+
+    private func ledBrightness(volume: Float, muted: Bool) -> Double {
+        muted ? 0.0 : max(0.0, min(1.0, Double(volume)))
     }
 
     private func updateStatusTitle(connected: Bool) {
