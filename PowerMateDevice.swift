@@ -1,13 +1,23 @@
 import Foundation
 import IOKit.hid
 
+struct ConnectedPowerMateStatus {
+    let id: UInt64
+    let persistentIdentifier: String
+    let name: String
+    var reportCount = 0
+    var rotationCount = 0
+    var buttonPressCount = 0
+    var debouncedButtonPressCount = 0
+    var lastReport = "none"
+}
+
 struct PowerMateDeviceStatus {
     var connected = false
     var openResult = "not started"
     var deviceCount = 0
-    var reportCount = 0
-    var debouncedButtonPressCount = 0
-    var lastReport = "none"
+    var devices: [ConnectedPowerMateStatus] = []
+    var updatedDeviceID: UInt64?
 }
 
 final class PowerMateDevice {
@@ -17,19 +27,17 @@ final class PowerMateDevice {
     private let buttonDebounceInterval: TimeInterval = 0.25
 
     private var manager: IOHIDManager?
-    private var previousButtonDown = false
-    private var lastAcceptedButtonPressTime = -Double.infinity
     private var status = PowerMateDeviceStatus()
-    private var reportRegistrations: [Int: ReportRegistration] = [:]
+    private var deviceStates: [UInt64: PowerMateDeviceState] = [:]
 
-    private let onRotate: (Int) -> Void
-    private let onButtonPress: () -> Void
+    private let onRotate: (Int, UInt64) -> Void
+    private let onButtonPress: (UInt64) -> Void
     private let onConnectionChanged: (Bool) -> Void
     private let onStatusChanged: (PowerMateDeviceStatus) -> Void
 
     init(
-        onRotate: @escaping (Int) -> Void,
-        onButtonPress: @escaping () -> Void,
+        onRotate: @escaping (Int, UInt64) -> Void,
+        onButtonPress: @escaping (UInt64) -> Void,
         onConnectionChanged: @escaping (Bool) -> Void,
         onStatusChanged: @escaping (PowerMateDeviceStatus) -> Void
     ) {
@@ -69,16 +77,6 @@ final class PowerMateDevice {
             powerMate.refreshMatchedDevices()
         }, context)
 
-        IOHIDManagerRegisterInputReportCallback(
-            manager,
-            { context, result, _, _, _, report, reportLength in
-                guard result == kIOReturnSuccess, let context else { return }
-                Unmanaged<PowerMateDevice>.fromOpaque(context).takeUnretainedValue()
-                    .handleInputReport(report, length: reportLength)
-            },
-            context
-        )
-
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.manager = manager
@@ -93,7 +91,7 @@ final class PowerMateDevice {
             IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         }
-        reportRegistrations.removeAll()
+        deviceStates.removeAll()
         manager = nil
     }
 
@@ -106,59 +104,81 @@ final class PowerMateDevice {
         let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>
         status.deviceCount = devices?.count ?? 0
         devices?.forEach(registerInputReportCallback)
+        status.devices = sortedDeviceStatuses()
         setConnected(status.openResult == "success" && status.deviceCount > 0)
     }
 
     private func registerInputReportCallback(for device: IOHIDDevice) {
-        let key = Int(CFHash(device))
-        guard reportRegistrations[key] == nil else { return }
+        let id = PowerMateDevice.registryID(for: device)
+        guard deviceStates[id] == nil else { return }
 
-        let registration = ReportRegistration(length: reportLength)
-        reportRegistrations[key] = registration
+        let state = PowerMateDeviceState(
+            owner: self,
+            deviceID: id,
+            persistentIdentifier: persistentIdentifier(for: device),
+            name: deviceName(for: device),
+            reportLength: reportLength
+        )
+        deviceStates[id] = state
 
         IOHIDDeviceRegisterInputReportCallback(
             device,
-            registration.buffer,
+            state.buffer,
             reportLength,
             { context, result, _, _, _, report, reportLength in
                 guard result == kIOReturnSuccess, let context else { return }
-                Unmanaged<PowerMateDevice>.fromOpaque(context).takeUnretainedValue()
-                    .handleInputReport(report, length: reportLength)
+                let state = Unmanaged<PowerMateDeviceState>.fromOpaque(context).takeUnretainedValue()
+                state.owner?.handleInputReport(report, length: reportLength, for: state.deviceID)
             },
-            Unmanaged.passUnretained(self).toOpaque()
+            Unmanaged.passUnretained(state).toOpaque()
         )
     }
 
     private func unregisterInputReportCallback(for device: IOHIDDevice) {
-        reportRegistrations.removeValue(forKey: Int(CFHash(device)))
+        deviceStates.removeValue(forKey: PowerMateDevice.registryID(for: device))
     }
 
-    private func handleInputReport(_ report: UnsafeMutablePointer<UInt8>, length: CFIndex) {
+    private func handleInputReport(_ report: UnsafeMutablePointer<UInt8>, length: CFIndex, for deviceID: UInt64) {
         guard length >= 2 else { return }
+        guard let state = deviceStates[deviceID] else { return }
 
-        status.reportCount += 1
+        state.status.reportCount += 1
         let bytes = (0..<Int(length)).map { String(format: "%02x", report[$0]) }
-        status.lastReport = bytes.joined(separator: " ")
-        publishStatus()
+        state.status.lastReport = bytes.joined(separator: " ")
 
+        var shouldCallButtonHandler = false
         let buttonDown = report[0] != 0
-        if buttonDown && !previousButtonDown {
+        if buttonDown && !state.previousButtonDown {
             let now = ProcessInfo.processInfo.systemUptime
-            if now - lastAcceptedButtonPressTime >= buttonDebounceInterval {
-                lastAcceptedButtonPressTime = now
-                callOnMain(onButtonPress)
+            if now - state.lastAcceptedButtonPressTime >= buttonDebounceInterval {
+                state.lastAcceptedButtonPressTime = now
+                state.status.buttonPressCount += 1
+                shouldCallButtonHandler = true
             } else {
-                status.debouncedButtonPressCount += 1
-                publishStatus()
+                state.status.debouncedButtonPressCount += 1
             }
         }
-        previousButtonDown = buttonDown
+        state.previousButtonDown = buttonDown
 
         let delta = Int(Int8(bitPattern: report[1]))
-        guard delta != 0 else { return }
+        if delta != 0 {
+            state.status.rotationCount += 1
+        }
 
-        callOnMain { [onRotate] in
-            onRotate(delta)
+        status.devices = sortedDeviceStatuses()
+        status.updatedDeviceID = deviceID
+        publishStatus()
+
+        if shouldCallButtonHandler {
+            callOnMain { [onButtonPress] in
+                onButtonPress(deviceID)
+            }
+        }
+
+        if delta != 0 {
+            callOnMain { [onRotate] in
+                onRotate(delta, deviceID)
+            }
         }
     }
 
@@ -192,14 +212,70 @@ final class PowerMateDevice {
         }
         return String(format: "0x%08x", result)
     }
+
+    private func sortedDeviceStatuses() -> [ConnectedPowerMateStatus] {
+        deviceStates.values
+            .map(\.status)
+            .sorted { $0.id < $1.id }
+            .enumerated()
+            .map { index, status in
+                var status = status
+                status = ConnectedPowerMateStatus(
+                    id: status.id,
+                    persistentIdentifier: status.persistentIdentifier,
+                    name: "PowerMate \(index + 1)",
+                    reportCount: status.reportCount,
+                    rotationCount: status.rotationCount,
+                    buttonPressCount: status.buttonPressCount,
+                    debouncedButtonPressCount: status.debouncedButtonPressCount,
+                    lastReport: status.lastReport
+                )
+                return status
+            }
+    }
+
+    private func deviceName(for device: IOHIDDevice) -> String {
+        let product = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String
+        return product?.isEmpty == false ? product! : "PowerMate"
+    }
+
+    private func persistentIdentifier(for device: IOHIDDevice) -> String {
+        if let serial = IOHIDDeviceGetProperty(device, kIOHIDSerialNumberKey as CFString) as? String,
+           serial.isEmpty == false {
+            return "serial:\(serial)"
+        }
+
+        if let locationID = IOHIDDeviceGetProperty(device, kIOHIDLocationIDKey as CFString) as? NSNumber {
+            return "location:\(String(format: "%08x", locationID.uint32Value))"
+        }
+
+        return "registry:\(PowerMateDevice.registryID(for: device))"
+    }
+
+    private static func registryID(for device: IOHIDDevice) -> UInt64 {
+        var entryID: UInt64 = 0
+        let service = IOHIDDeviceGetService(device)
+        if service != 0, IORegistryEntryGetRegistryEntryID(service, &entryID) == KERN_SUCCESS {
+            return entryID
+        }
+        return UInt64(bitPattern: Int64(CFHash(device)))
+    }
 }
 
-private final class ReportRegistration {
+private final class PowerMateDeviceState {
+    weak var owner: PowerMateDevice?
+    let deviceID: UInt64
     let buffer: UnsafeMutablePointer<UInt8>
+    var status: ConnectedPowerMateStatus
+    var previousButtonDown = false
+    var lastAcceptedButtonPressTime = -Double.infinity
 
-    init(length: Int) {
-        buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: length)
-        buffer.initialize(repeating: 0, count: length)
+    init(owner: PowerMateDevice, deviceID: UInt64, persistentIdentifier: String, name: String, reportLength: Int) {
+        self.owner = owner
+        self.deviceID = deviceID
+        self.buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: reportLength)
+        self.status = ConnectedPowerMateStatus(id: deviceID, persistentIdentifier: persistentIdentifier, name: name)
+        buffer.initialize(repeating: 0, count: reportLength)
     }
 
     deinit {
