@@ -440,15 +440,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             refreshLED(level: brightness, label: "screen brightness", muted: false, sourceDeviceID: deviceID)
         case .horizontalScrolling:
             scrollController.scrollHorizontally(by: delta)
+            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "horizontal scrolling", muted: false, sourceDeviceID: deviceID)
         case .verticalScrolling:
             scrollController.scrollVertically(by: delta)
+            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "vertical scrolling", muted: false, sourceDeviceID: deviceID)
         case .horizontalMouseMovement:
             mouseMovementController.moveHorizontally(by: delta)
+            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "horizontal mouse", muted: false, sourceDeviceID: deviceID)
         case .verticalMouseMovement:
             mouseMovementController.moveVertically(by: delta)
+            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "vertical mouse", muted: false, sourceDeviceID: deviceID)
         }
     }
@@ -459,6 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch function(for: deviceID) {
         case .volume:
             let muted = audioController.toggleMute()
+            volumeClickFeedback.play()
             refreshLED(level: audioController.currentVolume(), label: "volume", muted: muted, sourceDeviceID: deviceID)
             showMuteOverlay(isMuted: muted)
         case .screenBrightness:
@@ -473,9 +478,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             break
         case .horizontalMouseMovement:
             mouseMovementController.clickPrimaryButton()
+            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "horizontal mouse", muted: false, sourceDeviceID: deviceID)
         case .verticalMouseMovement:
             mouseMovementController.clickPrimaryButton()
+            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "vertical mouse", muted: false, sourceDeviceID: deviceID)
         }
     }
@@ -1072,7 +1079,10 @@ private final class VolumeClickFeedback {
 
     func playIfVolumeChanged(from previousVolume: Float, to currentVolume: Float) {
         guard abs(currentVolume - previousVolume) > 0.0001 else { return }
+        play()
+    }
 
+    func play() {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastClickTime >= minimumClickInterval else { return }
         lastClickTime = now
