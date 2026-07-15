@@ -435,24 +435,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .screenBrightness:
             let previousBrightness = displayBrightnessController.currentBrightness()
             let brightness = displayBrightnessController.adjustBrightness(by: Float(delta) * 0.025)
-            volumeClickFeedback.playIfVolumeChanged(from: previousBrightness, to: brightness)
+            volumeClickFeedback.playQuietlyIfValueChanged(from: previousBrightness, to: brightness)
             DiagnosticsLog.write("display brightness \(Int((brightness * 100.0).rounded()))%, \(displayBrightnessController.lastStatus)")
             refreshLED(level: brightness, label: "screen brightness", muted: false, sourceDeviceID: deviceID)
         case .horizontalScrolling:
             scrollController.scrollHorizontally(by: delta)
-            volumeClickFeedback.play()
+            volumeClickFeedback.playQuietly()
             refreshLED(level: 0.5, label: "horizontal scrolling", muted: false, sourceDeviceID: deviceID)
         case .verticalScrolling:
             scrollController.scrollVertically(by: delta)
-            volumeClickFeedback.play()
+            volumeClickFeedback.playQuietly()
             refreshLED(level: 0.5, label: "vertical scrolling", muted: false, sourceDeviceID: deviceID)
         case .horizontalMouseMovement:
             mouseMovementController.moveHorizontally(by: delta)
-            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "horizontal mouse", muted: false, sourceDeviceID: deviceID)
         case .verticalMouseMovement:
             mouseMovementController.moveVertically(by: delta)
-            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "vertical mouse", muted: false, sourceDeviceID: deviceID)
         }
     }
@@ -463,13 +461,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch function(for: deviceID) {
         case .volume:
             let muted = audioController.toggleMute()
-            volumeClickFeedback.play()
+            volumeClickFeedback.playQuietly()
             refreshLED(level: audioController.currentVolume(), label: "volume", muted: muted, sourceDeviceID: deviceID)
             showMuteOverlay(isMuted: muted)
         case .screenBrightness:
             let previousBrightness = displayBrightnessController.currentBrightness()
             let brightness = displayBrightnessController.setBrightnessWithSystemKeys(0.5)
-            volumeClickFeedback.playIfVolumeChanged(from: previousBrightness, to: brightness)
+            volumeClickFeedback.playQuietlyIfValueChanged(from: previousBrightness, to: brightness)
             DiagnosticsLog.write("display brightness restored to 50%, \(displayBrightnessController.lastStatus)")
             refreshLED(level: brightness, label: "screen brightness", muted: false, sourceDeviceID: deviceID)
         case .horizontalScrolling:
@@ -478,11 +476,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             break
         case .horizontalMouseMovement:
             mouseMovementController.clickPrimaryButton()
-            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "horizontal mouse", muted: false, sourceDeviceID: deviceID)
         case .verticalMouseMovement:
             mouseMovementController.clickPrimaryButton()
-            volumeClickFeedback.play()
             refreshLED(level: 0.5, label: "vertical mouse", muted: false, sourceDeviceID: deviceID)
         }
     }
@@ -1076,19 +1072,34 @@ private final class VolumeClickFeedback {
     private let clickSound = NSSound(named: NSSound.Name("Tink"))
     private var lastClickTime: TimeInterval = 0
     private let minimumClickInterval: TimeInterval = 0.035
+    private let normalVolume: Float = 0.45
+    private let quietVolume: Float = 0.18
 
     func playIfVolumeChanged(from previousVolume: Float, to currentVolume: Float) {
         guard abs(currentVolume - previousVolume) > 0.0001 else { return }
-        play()
+        play(volume: normalVolume)
+    }
+
+    func playQuietlyIfValueChanged(from previousValue: Float, to currentValue: Float) {
+        guard abs(currentValue - previousValue) > 0.0001 else { return }
+        playQuietly()
     }
 
     func play() {
+        play(volume: normalVolume)
+    }
+
+    func playQuietly() {
+        play(volume: quietVolume)
+    }
+
+    private func play(volume: Float) {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastClickTime >= minimumClickInterval else { return }
         lastClickTime = now
 
         clickSound?.stop()
-        clickSound?.volume = 0.45
+        clickSound?.volume = volume
         clickSound?.play()
     }
 }
