@@ -68,11 +68,12 @@ private enum PowerMateFunction: String {
     case verticalScrolling
     case horizontalMouseMovement
     case verticalMouseMovement
+    case applicationSwitching
 
     var title: String {
         switch self {
         case .volume:
-            return "Volume"
+            return "Audio Volume"
         case .screenBrightness:
             return "Screen Brightness"
         case .horizontalScrolling:
@@ -83,6 +84,8 @@ private enum PowerMateFunction: String {
             return "Horizontal Mouse Movement"
         case .verticalMouseMovement:
             return "Vertical Mouse Movement"
+        case .applicationSwitching:
+            return "Application Switching"
         }
     }
 }
@@ -106,9 +109,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let functionPreferencesKey = "PowerMateFunctionsByPersistentIdentifier"
     private let showDockIconPreferenceKey = "ShowDockIcon"
     private let muteFeedbackPreferenceKey = "MutePowerMateHelperFeedback"
+    private let menuIndent = "    "
     private let volumeClickFeedback = VolumeClickFeedback()
     private let scrollController = VerticalScrollController()
     private let mouseMovementController = MouseMovementController()
+    private let applicationSwitcherController = ApplicationSwitcherController()
     private let ledController = LEDController()
     private var statusItem: NSStatusItem?
     private var statusRefreshTimer: Timer?
@@ -117,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var ghostOverlayImages: [String: NSImage] = [:]
     private var lastDiagnosticsLogLine = ""
     private var connectionMenuItem: NSMenuItem?
+    private var deviceStatusHeadingMenuItem: NSMenuItem?
     private var hidOpenMenuItem: NSMenuItem?
     private var reportMenuItem: NSMenuItem?
     private var eventsMenuItem: NSMenuItem?
@@ -342,15 +348,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "About PowerMate Helper", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(.separator())
         connectionMenuItem = NSMenuItem(title: "Devices Connected: starting", action: nil, keyEquivalent: "")
-        hidOpenMenuItem = NSMenuItem(title: "HID open: not started", action: nil, keyEquivalent: "")
-        reportMenuItem = NSMenuItem(title: "Last report: none", action: nil, keyEquivalent: "")
-        eventsMenuItem = NSMenuItem(title: "Events: 0 rotations, 0 buttons", action: nil, keyEquivalent: "")
-        audioMenuItem = NSMenuItem(title: "Audio: starting", action: nil, keyEquivalent: "")
-        ledMenuItem = NSMenuItem(title: "LED: not sent", action: nil, keyEquivalent: "")
-        displayMenuItem = NSMenuItem(title: "Display: not checked", action: nil, keyEquivalent: "")
+        connectionMenuItem?.isEnabled = false
+        deviceStatusHeadingMenuItem = NSMenuItem(title: "Device Status", action: nil, keyEquivalent: "")
+        deviceStatusHeadingMenuItem?.isEnabled = false
+        hidOpenMenuItem = NSMenuItem(title: "\(menuIndent)HID open: not started", action: nil, keyEquivalent: "")
+        reportMenuItem = NSMenuItem(title: "\(menuIndent)Last report: none", action: nil, keyEquivalent: "")
+        eventsMenuItem = NSMenuItem(title: "\(menuIndent)Events: 0 rotations, 0 buttons", action: nil, keyEquivalent: "")
+        audioMenuItem = NSMenuItem(title: "\(menuIndent)Audio: starting", action: nil, keyEquivalent: "")
+        ledMenuItem = NSMenuItem(title: "\(menuIndent)LED: not sent", action: nil, keyEquivalent: "")
+        displayMenuItem = NSMenuItem(title: "\(menuIndent)Display: not checked", action: nil, keyEquivalent: "")
 
         [
             connectionMenuItem,
+            deviceStatusHeadingMenuItem,
             hidOpenMenuItem,
             reportMenuItem,
             eventsMenuItem,
@@ -486,6 +496,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .verticalMouseMovement:
             mouseMovementController.moveVertically(by: delta)
             refreshLED(level: 0.5, label: "vertical mouse", muted: false, sourceDeviceID: deviceID)
+        case .applicationSwitching:
+            applicationSwitcherController.rotate(by: delta)
+            refreshLED(level: 0.5, label: "app switching", muted: false, sourceDeviceID: deviceID)
         }
     }
 
@@ -516,6 +529,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .verticalMouseMovement:
             mouseMovementController.clickPrimaryButton()
             refreshLED(level: 0.5, label: "vertical mouse", muted: false, sourceDeviceID: deviceID)
+        case .applicationSwitching:
+            applicationSwitcherController.activateSelection()
+            refreshLED(level: 0.5, label: "app switching", muted: false, sourceDeviceID: deviceID)
         }
     }
 
@@ -584,19 +600,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         connectionMenuItem?.title = currentHIDStatus.connected || isConnected
             ? "Devices Connected: \(currentHIDStatus.deviceCount)"
             : "Devices Connected: none"
-        hidOpenMenuItem?.title = "HID open: \(currentHIDStatus.openResult)"
-        reportMenuItem?.title = "Last report: \(displayedPowerMateStatus?.lastReport ?? "none")"
+        hidOpenMenuItem?.title = indentedMenuTitle("HID open: \(currentHIDStatus.openResult)")
+        reportMenuItem?.title = indentedMenuTitle("Last report: \(displayedPowerMateStatus?.lastReport ?? "none")")
         eventsMenuItem?.title = displayedPowerMateStatus.map {
-            "Events: \($0.rotationCount) rotations, \($0.buttonPressCount) buttons, \($0.debouncedButtonPressCount) bounce ignored"
-        } ?? "Events: 0 rotations, 0 buttons, 0 bounce ignored"
+            indentedMenuTitle("Events: \($0.rotationCount) rotations, \($0.buttonPressCount) buttons, \($0.debouncedButtonPressCount) bounce ignored")
+        } ?? indentedMenuTitle("Events: 0 rotations, 0 buttons, 0 bounce ignored")
         audioMenuItem?.title = String(
-            format: "Audio: volume %.0f%%, %@",
+            format: "\(menuIndent)Audio: volume %.0f%%, %@",
             audioController.currentVolume() * 100.0,
             audioController.isMuted() ? "muted" : "not muted"
         )
-        ledMenuItem?.title = "LED: \(displayedLEDStatus)"
+        ledMenuItem?.title = indentedMenuTitle("LED: \(displayedLEDStatus)")
         displayMenuItem?.title = String(
-            format: "Display: brightness %.0f%%, %@",
+            format: "\(menuIndent)Display: brightness %.0f%%, %@",
             displayBrightnessController.peekBrightness() * 100.0,
             displayBrightnessController.lastStatus
         )
@@ -679,13 +695,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         deviceMenuSignature = newSignature
 
         if currentHIDStatus.devices.isEmpty {
-            let item = NSMenuItem(title: "No PowerMate devices", action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: indentedMenuTitle("No PowerMate devices"), action: nil, keyEquivalent: "")
             item.isEnabled = false
             deviceMenuItems.append(item)
         } else {
             deviceMenuItems = currentHIDStatus.devices.map { device in
                 let item = NSMenuItem(
-                    title: device.name,
+                    title: indentedMenuTitle(device.name),
                     action: nil,
                     keyEquivalent: ""
                 )
@@ -699,6 +715,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for (offset, item) in deviceMenuItems.enumerated() {
             menu.insertItem(item, at: connectionIndex + 1 + offset)
         }
+    }
+
+    private func indentedMenuTitle(_ title: String) -> String {
+        "\(menuIndent)\(title)"
     }
 
     private func updateDeviceMenuItemStates() {
@@ -740,14 +760,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         submenu.addItem(.separator())
 
-        for function in [
-            PowerMateFunction.volume,
-            .screenBrightness,
-            .horizontalScrolling,
-            .verticalScrolling,
-            .horizontalMouseMovement,
-            .verticalMouseMovement
-        ] {
+        let functionGroups: [[PowerMateFunction]] = [
+            [.applicationSwitching, .volume, .screenBrightness],
+            [.horizontalScrolling, .verticalScrolling],
+            [.horizontalMouseMovement, .verticalMouseMovement]
+        ]
+
+        for (groupIndex, functions) in functionGroups.enumerated() {
+            if groupIndex > 0 {
+                submenu.addItem(.separator())
+            }
+
+            for function in functions {
             let item = NSMenuItem(
                 title: function.title,
                 action: #selector(selectPowerMateFunction(_:)),
@@ -757,6 +781,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.representedObject = PowerMateFunctionMenuAction(deviceID: device.id, function: function)
             item.state = function == self.function(for: device.id) ? .on : .off
             submenu.addItem(item)
+            }
         }
 
         return submenu
@@ -842,6 +867,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             refreshLED(
                 level: 0.5,
                 label: "vertical mouse",
+                muted: false,
+                sourceDeviceID: sourceDeviceID
+            )
+        case .applicationSwitching:
+            refreshLED(
+                level: 0.5,
+                label: "app switching",
                 muted: false,
                 sourceDeviceID: sourceDeviceID
             )
@@ -1364,5 +1396,285 @@ private final class MouseMovementController {
             .map(CGDisplayBounds)
         cachedDisplayBoundsTime = now
         return cachedDisplayBounds
+    }
+}
+
+private final class ApplicationSwitcherController {
+    private let overlayDuration: TimeInterval = 5.0
+    private let overlayWidth: CGFloat = 420
+    private let rowHeight: CGFloat = 48
+    private let verticalPadding: CGFloat = 24
+    private let preferredVisibleRows = 7
+    private let detentsPerSelectionStep = 2
+    private var candidates: [NSRunningApplication] = []
+    private var selectedIndex = 0
+    private var pendingRotationDelta = 0
+    private var window: NSWindow?
+    private var stackView: NSStackView?
+    private var rowViews: [AppSwitcherRowView] = []
+    private var dismissTimer: Timer?
+
+    func rotate(by delta: Int) {
+        guard delta != 0 else { return }
+
+        if window == nil || candidates.isEmpty {
+            reloadCandidates()
+        }
+
+        guard candidates.isEmpty == false else {
+            hide()
+            return
+        }
+
+        pendingRotationDelta += delta
+        let selectionSteps = pendingRotationDelta / detentsPerSelectionStep
+        guard selectionSteps != 0 else {
+            showOverlay()
+            scheduleDismissal()
+            return
+        }
+
+        pendingRotationDelta -= selectionSteps * detentsPerSelectionStep
+        selectedIndex = wrappedIndex(selectedIndex + selectionSteps)
+        showOverlay()
+        scheduleDismissal()
+    }
+
+    func activateSelection() {
+        guard candidates.indices.contains(selectedIndex) else {
+            hide()
+            return
+        }
+
+        let app = candidates[selectedIndex]
+        hide()
+
+        let activated = app.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+        DiagnosticsLog.write(
+            activated
+                ? "activated app switch selection \(app.localizedName ?? app.bundleIdentifier ?? "unknown")"
+                : "failed to activate app switch selection \(app.localizedName ?? app.bundleIdentifier ?? "unknown")"
+        )
+    }
+
+    private func reloadCandidates() {
+        let ownBundleID = Bundle.main.bundleIdentifier
+        let workspace = NSWorkspace.shared
+        let regularApps = workspace.runningApplications.filter { app in
+            app.activationPolicy == .regular &&
+                app.isTerminated == false &&
+                app.bundleIdentifier != ownBundleID
+        }
+
+        let frontmost = workspace.frontmostApplication
+        let frontmostApp = regularApps.first { app in
+            app.processIdentifier == frontmost?.processIdentifier
+        }
+        let remainingApps = regularApps
+            .filter { app in app.processIdentifier != frontmostApp?.processIdentifier }
+            .sorted { lhs, rhs in
+                let lhsName = lhs.localizedName ?? lhs.bundleIdentifier ?? ""
+                let rhsName = rhs.localizedName ?? rhs.bundleIdentifier ?? ""
+                return lhsName.localizedCaseInsensitiveCompare(rhsName) == .orderedAscending
+            }
+
+        candidates = [frontmostApp].compactMap { $0 } + remainingApps
+        selectedIndex = candidates.count > 1 ? 1 : 0
+    }
+
+    private func showOverlay() {
+        let window = self.window ?? makeWindow()
+        self.window = window
+
+        rebuildRows()
+        updateSelection()
+        center(window)
+        window.orderFrontRegardless()
+    }
+
+    private func makeWindow() -> NSWindow {
+        let window = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: overlayWidth, height: 260),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.ignoresMouseEvents = true
+        window.hasShadow = true
+
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 14
+        container.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.78).cgColor
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12)
+        ])
+
+        window.contentView = container
+        stackView = stack
+        return window
+    }
+
+    private func rebuildRows() {
+        guard let stackView else { return }
+
+        stackView.arrangedSubviews.forEach {
+            stackView.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+
+        let visibleItems = visibleCandidateItems()
+        rowViews = visibleItems.map { item in
+            let row = AppSwitcherRowView()
+            row.configure(
+                icon: item.app.icon,
+                title: item.app.localizedName ?? item.app.bundleIdentifier ?? "Unknown App"
+            )
+            stackView.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
+            row.isHighlighted = item.index == selectedIndex
+            return row
+        }
+
+        let height = CGFloat(max(visibleItems.count, 1)) * rowHeight + verticalPadding
+        window?.setContentSize(NSSize(width: overlayWidth, height: height))
+    }
+
+    private func updateSelection() {
+        rebuildRows()
+    }
+
+    private func center(_ window: NSWindow) {
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 900, height: 600)
+        let frame = window.frame
+        window.setFrameOrigin(NSPoint(
+            x: screenFrame.midX - frame.width / 2,
+            y: screenFrame.midY - frame.height / 2
+        ))
+    }
+
+    private func scheduleDismissal() {
+        dismissTimer?.invalidate()
+        let timer = Timer(timeInterval: overlayDuration, repeats: false) { [weak self] _ in
+            self?.hide()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        dismissTimer = timer
+    }
+
+    private func hide() {
+        dismissTimer?.invalidate()
+        dismissTimer = nil
+        window?.orderOut(nil)
+        candidates = []
+        selectedIndex = 0
+        pendingRotationDelta = 0
+    }
+
+    private func wrappedIndex(_ index: Int) -> Int {
+        guard candidates.isEmpty == false else { return 0 }
+
+        if index < 0 {
+            return candidates.count - 1
+        }
+        if index >= candidates.count {
+            return 0
+        }
+        return index
+    }
+
+    private func visibleCandidateItems() -> [(index: Int, app: NSRunningApplication)] {
+        guard candidates.isEmpty == false else { return [] }
+
+        let visibleCount = visibleRowCount()
+        let halfWindow = visibleCount / 2
+        let offsets = (-halfWindow)..<(-halfWindow + visibleCount)
+
+        return offsets.map { offset in
+            let index = wrappedIndex(selectedIndex + offset)
+            return (index: index, app: candidates[index])
+        }
+    }
+
+    private func visibleRowCount() -> Int {
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 900, height: 600)
+        let rowsThatFit = max(1, Int((screenFrame.height - 120 - verticalPadding) / rowHeight))
+        let boundedCount = min(preferredVisibleRows, rowsThatFit, candidates.count)
+
+        if boundedCount <= 1 {
+            return 1
+        }
+        return boundedCount.isMultiple(of: 2) ? boundedCount - 1 : boundedCount
+    }
+}
+
+private final class AppSwitcherRowView: NSView {
+    private let iconView = NSImageView()
+    private let titleField = NSTextField(labelWithString: "")
+
+    var isHighlighted = false {
+        didSet {
+            layer?.backgroundColor = isHighlighted
+                ? NSColor.systemBlue.withAlphaComponent(0.82).cgColor
+                : NSColor.clear.cgColor
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    func configure(icon: NSImage?, title: String) {
+        iconView.image = icon
+        titleField.stringValue = title
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        translatesAutoresizingMaskIntoConstraints = false
+
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleField.textColor = .white
+        titleField.font = .systemFont(ofSize: 18, weight: .semibold)
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(iconView)
+        addSubview(titleField)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 44),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 30),
+            iconView.heightAnchor.constraint(equalToConstant: 30),
+            titleField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
+            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            titleField.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
     }
 }
