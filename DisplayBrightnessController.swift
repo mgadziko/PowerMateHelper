@@ -248,6 +248,10 @@ final class DisplayBrightnessController {
     }
 
     private func postSystemBrightnessKey(keyType: Int32) -> Bool {
+        guard AccessibilityPermissionController.requestIfNeeded(reason: "screen brightness key events") else {
+            return false
+        }
+
         var posted = false
 
         for keyState in [0xA, 0xB] {

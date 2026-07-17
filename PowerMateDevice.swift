@@ -29,6 +29,7 @@ final class PowerMateDevice {
     private var manager: IOHIDManager?
     private var status = PowerMateDeviceStatus()
     private var deviceStates: [UInt64: PowerMateDeviceState] = [:]
+    private var recentlyRemovedDeviceKeys: Set<String> = []
 
     private let onRotate: (Int, UInt64) -> Void
     private let onButtonPress: (UInt64) -> Void
@@ -66,6 +67,7 @@ final class PowerMateDevice {
         IOHIDManagerRegisterDeviceMatchingCallback(manager, { context, _, _, device in
             guard let context else { return }
             let powerMate = Unmanaged<PowerMateDevice>.fromOpaque(context).takeUnretainedValue()
+            powerMate.recentlyRemovedDeviceKeys.subtract(powerMate.deviceIdentityKeys(for: device))
             powerMate.registerInputReportCallback(for: device)
             powerMate.refreshMatchedDevices()
         }, context)
@@ -73,7 +75,9 @@ final class PowerMateDevice {
         IOHIDManagerRegisterDeviceRemovalCallback(manager, { context, _, _, device in
             guard let context else { return }
             let powerMate = Unmanaged<PowerMateDevice>.fromOpaque(context).takeUnretainedValue()
-            powerMate.unregisterInputReportCallback(for: device)
+            let removedKeys = powerMate.deviceIdentityKeys(for: device)
+            powerMate.recentlyRemovedDeviceKeys.formUnion(removedKeys)
+            powerMate.unregisterDevice(matching: removedKeys)
             powerMate.refreshMatchedDevices()
         }, context)
 
@@ -102,10 +106,17 @@ final class PowerMateDevice {
         }
 
         let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>
-        status.deviceCount = devices?.count ?? 0
-        devices?.forEach(registerInputReportCallback)
+        let matchedDevices = devices ?? []
+        let activeDevices = matchedDevices.filter {
+            deviceIdentityKeys(for: $0).isDisjoint(with: recentlyRemovedDeviceKeys)
+        }
+        let activeDeviceKeys = Set(activeDevices.flatMap { deviceIdentityKeys(for: $0) })
+        deviceStates = deviceStates.filter { $0.value.identityKeys.isDisjoint(with: activeDeviceKeys) == false }
+        activeDevices.forEach(registerInputReportCallback)
+        status.deviceCount = deviceStates.count
         status.devices = sortedDeviceStatuses()
-        setConnected(status.openResult == "success" && status.deviceCount > 0)
+        status.updatedDeviceID = nil
+        setConnected(status.openResult == "success" && status.devices.isEmpty == false)
     }
 
     private func registerInputReportCallback(for device: IOHIDDevice) {
@@ -115,6 +126,7 @@ final class PowerMateDevice {
         let state = PowerMateDeviceState(
             owner: self,
             deviceID: id,
+            identityKeys: deviceIdentityKeys(for: device),
             persistentIdentifier: persistentIdentifier(for: device),
             name: deviceName(for: device),
             reportLength: reportLength
@@ -134,8 +146,8 @@ final class PowerMateDevice {
         )
     }
 
-    private func unregisterInputReportCallback(for device: IOHIDDevice) {
-        deviceStates.removeValue(forKey: PowerMateDevice.registryID(for: device))
+    private func unregisterDevice(matching identityKeys: Set<String>) {
+        deviceStates = deviceStates.filter { $0.value.identityKeys.isDisjoint(with: identityKeys) }
     }
 
     private func handleInputReport(_ report: UnsafeMutablePointer<UInt8>, length: CFIndex, for deviceID: UInt64) {
@@ -252,6 +264,23 @@ final class PowerMateDevice {
         return "registry:\(PowerMateDevice.registryID(for: device))"
     }
 
+    private func deviceIdentityKeys(for device: IOHIDDevice) -> Set<String> {
+        var keys = Set<String>()
+        keys.insert("registry:\(PowerMateDevice.registryID(for: device))")
+        keys.insert("cfhash:\(CFHash(device))")
+
+        if let serial = IOHIDDeviceGetProperty(device, kIOHIDSerialNumberKey as CFString) as? String,
+           serial.isEmpty == false {
+            keys.insert("serial:\(serial)")
+        }
+
+        if let locationID = IOHIDDeviceGetProperty(device, kIOHIDLocationIDKey as CFString) as? NSNumber {
+            keys.insert("location:\(String(format: "%08x", locationID.uint32Value))")
+        }
+
+        return keys
+    }
+
     private static func registryID(for device: IOHIDDevice) -> UInt64 {
         var entryID: UInt64 = 0
         let service = IOHIDDeviceGetService(device)
@@ -265,14 +294,16 @@ final class PowerMateDevice {
 private final class PowerMateDeviceState {
     weak var owner: PowerMateDevice?
     let deviceID: UInt64
+    let identityKeys: Set<String>
     let buffer: UnsafeMutablePointer<UInt8>
     var status: ConnectedPowerMateStatus
     var previousButtonDown = false
     var lastAcceptedButtonPressTime = -Double.infinity
 
-    init(owner: PowerMateDevice, deviceID: UInt64, persistentIdentifier: String, name: String, reportLength: Int) {
+    init(owner: PowerMateDevice, deviceID: UInt64, identityKeys: Set<String>, persistentIdentifier: String, name: String, reportLength: Int) {
         self.owner = owner
         self.deviceID = deviceID
+        self.identityKeys = identityKeys
         self.buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: reportLength)
         self.status = ConnectedPowerMateStatus(id: deviceID, persistentIdentifier: persistentIdentifier, name: name)
         buffer.initialize(repeating: 0, count: reportLength)

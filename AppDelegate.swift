@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import ServiceManagement
 
 private var powerMateAppDelegate: AppDelegate?
@@ -22,6 +23,29 @@ private enum DiagnosticsLog {
         defer { try? handle.close() }
         _ = try? handle.seekToEnd()
         try? handle.write(contentsOf: data)
+    }
+}
+
+enum AccessibilityPermissionController {
+    private static var didRequestPrompt = false
+
+    static var isTrusted: Bool {
+        AXIsProcessTrusted()
+    }
+
+    static func requestIfNeeded(reason: String) -> Bool {
+        if isTrusted {
+            return true
+        }
+
+        if didRequestPrompt == false {
+            didRequestPrompt = true
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            AXIsProcessTrustedWithOptions(options)
+        }
+
+        DiagnosticsLog.write("\(reason) requires Accessibility permission")
+        return false
     }
 }
 
@@ -435,16 +459,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .screenBrightness:
             let previousBrightness = displayBrightnessController.currentBrightness()
             let brightness = displayBrightnessController.adjustBrightness(by: Float(delta) * 0.025)
-            volumeClickFeedback.playQuietlyIfValueChanged(from: previousBrightness, to: brightness)
+            if displayBrightnessController.lastWriteSucceeded {
+                volumeClickFeedback.playQuietlyIfValueChanged(from: previousBrightness, to: brightness)
+            }
             DiagnosticsLog.write("display brightness \(Int((brightness * 100.0).rounded()))%, \(displayBrightnessController.lastStatus)")
             refreshLED(level: brightness, label: "screen brightness", muted: false, sourceDeviceID: deviceID)
         case .horizontalScrolling:
-            scrollController.scrollHorizontally(by: delta)
-            volumeClickFeedback.playQuietly()
+            if scrollController.scrollHorizontally(by: delta) {
+                volumeClickFeedback.playQuietly()
+            }
             refreshLED(level: 0.5, label: "horizontal scrolling", muted: false, sourceDeviceID: deviceID)
         case .verticalScrolling:
-            scrollController.scrollVertically(by: delta)
-            volumeClickFeedback.playQuietly()
+            if scrollController.scrollVertically(by: delta) {
+                volumeClickFeedback.playQuietly()
+            }
             refreshLED(level: 0.5, label: "vertical scrolling", muted: false, sourceDeviceID: deviceID)
         case .horizontalMouseMovement:
             mouseMovementController.moveHorizontally(by: delta)
@@ -467,7 +495,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .screenBrightness:
             let previousBrightness = displayBrightnessController.currentBrightness()
             let brightness = displayBrightnessController.setBrightnessWithSystemKeys(0.5)
-            volumeClickFeedback.playQuietlyIfValueChanged(from: previousBrightness, to: brightness)
+            if displayBrightnessController.lastWriteSucceeded {
+                volumeClickFeedback.playQuietlyIfValueChanged(from: previousBrightness, to: brightness)
+            }
             DiagnosticsLog.write("display brightness restored to 50%, \(displayBrightnessController.lastStatus)")
             refreshLED(level: brightness, label: "screen brightness", muted: false, sourceDeviceID: deviceID)
         case .horizontalScrolling:
@@ -863,7 +893,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "PowerMate Helper™ app"
-        alert.informativeText = "©2026 Mark Gadzikowski. All Rights Reserved Worldwide.\nGriffin PowerMate® is a registered trademark of Griffin Technology, LLC.\n\nContact: powermatehelper@gadzikowski.com"
+        alert.informativeText = "©2026 Mark Gadzikowski. All Rights Reserved Worldwide.\nGriffin PowerMate® is a registered trademark of Griffin Technology, LLC.\n\nContact: powermatehelper@quantumpenguin.net"
         alert.accessoryView = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 1))
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -1171,7 +1201,12 @@ private final class LEDController {
 private final class VerticalScrollController {
     private let scrollMultiplier = 4
 
-    func scrollHorizontally(by delta: Int) {
+    @discardableResult
+    func scrollHorizontally(by delta: Int) -> Bool {
+        guard AccessibilityPermissionController.requestIfNeeded(reason: "horizontal scrolling") else {
+            return false
+        }
+
         let wheelDelta = Int32(delta * scrollMultiplier)
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
@@ -1182,13 +1217,19 @@ private final class VerticalScrollController {
             wheel3: 0
         ) else {
             DiagnosticsLog.write("horizontal scroll event creation failed")
-            return
+            return false
         }
 
         event.post(tap: .cghidEventTap)
+        return true
     }
 
-    func scrollVertically(by delta: Int) {
+    @discardableResult
+    func scrollVertically(by delta: Int) -> Bool {
+        guard AccessibilityPermissionController.requestIfNeeded(reason: "vertical scrolling") else {
+            return false
+        }
+
         let wheelDelta = Int32(-delta * scrollMultiplier)
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
@@ -1199,10 +1240,11 @@ private final class VerticalScrollController {
             wheel3: 0
         ) else {
             DiagnosticsLog.write("vertical scroll event creation failed")
-            return
+            return false
         }
 
         event.post(tap: .cghidEventTap)
+        return true
     }
 }
 
