@@ -497,7 +497,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             mouseMovementController.moveVertically(by: delta)
             refreshLED(level: 0.5, label: "vertical mouse", muted: false, sourceDeviceID: deviceID)
         case .applicationSwitching:
-            applicationSwitcherController.rotate(by: delta)
+            if applicationSwitcherController.rotate(by: delta) {
+                volumeClickFeedback.playQuietly()
+            }
             refreshLED(level: 0.5, label: "app switching", muted: false, sourceDeviceID: deviceID)
         }
     }
@@ -530,7 +532,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             mouseMovementController.clickPrimaryButton()
             refreshLED(level: 0.5, label: "vertical mouse", muted: false, sourceDeviceID: deviceID)
         case .applicationSwitching:
-            applicationSwitcherController.activateSelection()
+            if applicationSwitcherController.activateSelection() {
+                volumeClickFeedback.playQuietly()
+            }
             refreshLED(level: 0.5, label: "app switching", muted: false, sourceDeviceID: deviceID)
         }
     }
@@ -749,7 +753,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let submenu = NSMenu()
 
         let showStatusItem = NSMenuItem(
-            title: "Show Device Status",
+            title: "Show Device Status for This PowerMate",
             action: #selector(selectPowerMateDevice(_:)),
             keyEquivalent: ""
         )
@@ -1400,7 +1404,7 @@ private final class MouseMovementController {
 }
 
 private final class ApplicationSwitcherController {
-    private let overlayDuration: TimeInterval = 5.0
+    private let overlayDuration: TimeInterval = 3.0
     private let overlayWidth: CGFloat = 420
     private let rowHeight: CGFloat = 48
     private let verticalPadding: CGFloat = 24
@@ -1414,8 +1418,9 @@ private final class ApplicationSwitcherController {
     private var rowViews: [AppSwitcherRowView] = []
     private var dismissTimer: Timer?
 
-    func rotate(by delta: Int) {
-        guard delta != 0 else { return }
+    @discardableResult
+    func rotate(by delta: Int) -> Bool {
+        guard delta != 0 else { return false }
 
         if window == nil || candidates.isEmpty {
             reloadCandidates()
@@ -1423,7 +1428,7 @@ private final class ApplicationSwitcherController {
 
         guard candidates.isEmpty == false else {
             hide()
-            return
+            return false
         }
 
         pendingRotationDelta += delta
@@ -1431,19 +1436,21 @@ private final class ApplicationSwitcherController {
         guard selectionSteps != 0 else {
             showOverlay()
             scheduleDismissal()
-            return
+            return false
         }
 
         pendingRotationDelta -= selectionSteps * detentsPerSelectionStep
         selectedIndex = wrappedIndex(selectedIndex + selectionSteps)
         showOverlay()
         scheduleDismissal()
+        return true
     }
 
-    func activateSelection() {
+    @discardableResult
+    func activateSelection() -> Bool {
         guard candidates.indices.contains(selectedIndex) else {
             hide()
-            return
+            return false
         }
 
         let app = candidates[selectedIndex]
@@ -1455,6 +1462,7 @@ private final class ApplicationSwitcherController {
                 ? "activated app switch selection \(app.localizedName ?? app.bundleIdentifier ?? "unknown")"
                 : "failed to activate app switch selection \(app.localizedName ?? app.bundleIdentifier ?? "unknown")"
         )
+        return activated
     }
 
     private func reloadCandidates() {
