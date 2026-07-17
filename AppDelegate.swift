@@ -105,6 +105,7 @@ private struct PowerMateDeviceMenuSignature: Equatable {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let functionPreferencesKey = "PowerMateFunctionsByPersistentIdentifier"
     private let showDockIconPreferenceKey = "ShowDockIcon"
+    private let muteFeedbackPreferenceKey = "MutePowerMateHelperFeedback"
     private let volumeClickFeedback = VolumeClickFeedback()
     private let scrollController = VerticalScrollController()
     private let mouseMovementController = MouseMovementController()
@@ -123,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var ledMenuItem: NSMenuItem?
     private var displayMenuItem: NSMenuItem?
     private var launchAtStartupMenuItem: NSMenuItem?
+    private var muteFeedbackMenuItem: NSMenuItem?
     private var dockIconMenuItem: NSMenuItem?
     private var deviceMenuItems: [NSMenuItem] = []
     private var deviceMenuSignature: [PowerMateDeviceMenuSignature] = []
@@ -144,6 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DiagnosticsLog.write("launch begin")
         applyDockIconPreference()
+        applyFeedbackMutePreference()
 
         switch handleExistingPowerMateHelperIfNeeded() {
         case .continueLaunching:
@@ -359,12 +362,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         launchAtStartupMenuItem = NSMenuItem(title: "Launch on Startup", action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
         menu.addItem(launchAtStartupMenuItem!)
+        muteFeedbackMenuItem = NSMenuItem(title: "Mute PowerMate Helper", action: #selector(toggleFeedbackMute), keyEquivalent: "")
+        menu.addItem(muteFeedbackMenuItem!)
         dockIconMenuItem = NSMenuItem(title: "Show Dock Icon", action: #selector(toggleDockIcon), keyEquivalent: "")
         menu.addItem(dockIconMenuItem!)
         menu.addItem(NSMenuItem(title: "Quit PowerMate Helper", action: #selector(quit), keyEquivalent: ""))
         item.menu = menu
         statusItem = item
         updateLaunchAtStartupMenuItem()
+        updateFeedbackMuteMenuItem()
         updateDockIconMenuItem()
     }
 
@@ -887,6 +893,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.runModal()
     }
 
+    @objc private func toggleFeedbackMute() {
+        let shouldMute = UserDefaults.standard.bool(forKey: muteFeedbackPreferenceKey) == false
+        UserDefaults.standard.set(shouldMute, forKey: muteFeedbackPreferenceKey)
+        applyFeedbackMutePreference()
+        updateFeedbackMuteMenuItem()
+        DiagnosticsLog.write(shouldMute ? "PowerMate Helper feedback muted" : "PowerMate Helper feedback unmuted")
+    }
+
+    private func applyFeedbackMutePreference() {
+        volumeClickFeedback.isMuted = UserDefaults.standard.bool(forKey: muteFeedbackPreferenceKey)
+    }
+
+    private func updateFeedbackMuteMenuItem() {
+        guard let muteFeedbackMenuItem else { return }
+
+        muteFeedbackMenuItem.title = "Mute PowerMate Helper"
+        muteFeedbackMenuItem.state = UserDefaults.standard.bool(forKey: muteFeedbackPreferenceKey) ? .on : .off
+    }
+
     @objc private func showAbout() {
         NSApp.activate(ignoringOtherApps: true)
 
@@ -1104,6 +1129,7 @@ private final class VolumeClickFeedback {
     private let minimumClickInterval: TimeInterval = 0.035
     private let normalVolume: Float = 0.45
     private let quietVolume: Float = 0.18
+    var isMuted = false
 
     func playIfVolumeChanged(from previousVolume: Float, to currentVolume: Float) {
         guard abs(currentVolume - previousVolume) > 0.0001 else { return }
@@ -1124,6 +1150,8 @@ private final class VolumeClickFeedback {
     }
 
     private func play(volume: Float) {
+        guard isMuted == false else { return }
+
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastClickTime >= minimumClickInterval else { return }
         lastClickTime = now
