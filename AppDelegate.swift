@@ -246,13 +246,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func findExistingPowerMateHelperApp() -> NSRunningApplication? {
         let currentPID = ProcessInfo.processInfo.processIdentifier
-        let currentBundleID = Bundle.main.bundleIdentifier
 
         return NSWorkspace.shared.runningApplications.first { app in
             app.processIdentifier != currentPID
-                && app.bundleIdentifier == currentBundleID
+                && isPowerMateHelperApp(app)
                 && app.isTerminated == false
         }
+    }
+
+    private func isPowerMateHelperApp(_ app: NSRunningApplication) -> Bool {
+        let bundleIdentifier = app.bundleIdentifier?.lowercased() ?? ""
+        let appName = app.localizedName?.lowercased() ?? ""
+        let bundlePath = app.bundleURL?.path.lowercased() ?? ""
+
+        return bundleIdentifier == Bundle.main.bundleIdentifier?.lowercased()
+            || bundleIdentifier == "com.gadzikowski.powermatehelper"
+            || bundleIdentifier == "com.mgg.powermatehelper"
+            || bundleIdentifier == "com.mgg.powermatemgg"
+            || appName == "powermate helper"
+            || appName == "powermatemgg"
+            || bundlePath.hasSuffix("/powermate helper.app")
+            || bundlePath.hasSuffix("/powermatemgg.app")
     }
 
     private func waitForTermination(of app: NSRunningApplication, timeout: TimeInterval) -> Bool {
@@ -297,10 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let appName = app.localizedName?.lowercased() ?? ""
         let bundlePath = app.bundleURL?.path.lowercased() ?? ""
 
-        guard bundleIdentifier != Bundle.main.bundleIdentifier?.lowercased(),
-              appName != "powermatemgg",
-              appName != "powermate helper",
-              bundlePath.hasSuffix("/powermatemgg.app") == false else {
+        guard isPowerMateHelperApp(app) == false else {
             return false
         }
 
@@ -372,7 +383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         launchAtStartupMenuItem = NSMenuItem(title: "Launch on Startup", action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
         menu.addItem(launchAtStartupMenuItem!)
-        muteFeedbackMenuItem = NSMenuItem(title: "Mute PowerMate Helper", action: #selector(toggleFeedbackMute), keyEquivalent: "")
+        muteFeedbackMenuItem = NSMenuItem(title: "Audio UI Feedback", action: #selector(toggleFeedbackMute), keyEquivalent: "")
         menu.addItem(muteFeedbackMenuItem!)
         dockIconMenuItem = NSMenuItem(title: "Show Dock Icon", action: #selector(toggleDockIcon), keyEquivalent: "")
         menu.addItem(dockIconMenuItem!)
@@ -930,11 +941,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleFeedbackMute() {
-        let shouldMute = UserDefaults.standard.bool(forKey: muteFeedbackPreferenceKey) == false
-        UserDefaults.standard.set(shouldMute, forKey: muteFeedbackPreferenceKey)
+        let shouldEnableFeedback = UserDefaults.standard.bool(forKey: muteFeedbackPreferenceKey)
+        UserDefaults.standard.set(shouldEnableFeedback == false, forKey: muteFeedbackPreferenceKey)
         applyFeedbackMutePreference()
         updateFeedbackMuteMenuItem()
-        DiagnosticsLog.write(shouldMute ? "PowerMate Helper feedback muted" : "PowerMate Helper feedback unmuted")
+        DiagnosticsLog.write(shouldEnableFeedback ? "PowerMate Helper feedback enabled" : "PowerMate Helper feedback disabled")
     }
 
     private func applyFeedbackMutePreference() {
@@ -944,8 +955,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateFeedbackMuteMenuItem() {
         guard let muteFeedbackMenuItem else { return }
 
-        muteFeedbackMenuItem.title = "Mute PowerMate Helper"
-        muteFeedbackMenuItem.state = UserDefaults.standard.bool(forKey: muteFeedbackPreferenceKey) ? .on : .off
+        muteFeedbackMenuItem.title = "Audio UI Feedback"
+        muteFeedbackMenuItem.state = UserDefaults.standard.bool(forKey: muteFeedbackPreferenceKey) ? .off : .on
     }
 
     @objc private func showAbout() {
@@ -954,10 +965,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "PowerMate Helper™ app"
-        alert.informativeText = "©2026 Mark Gadzikowski. All Rights Reserved Worldwide.\nGriffin PowerMate® is a registered trademark of Griffin Technology, LLC.\n\nContact: powermatehelper@quantumpenguin.net"
+        alert.informativeText = "\(aboutVersionText())\n©2026 Mark Gadzikowski. All Rights Reserved Worldwide.\nGriffin PowerMate® is a registered trademark of Griffin Technology, LLC.\n\nContact: powermatehelper@quantumpenguin.net"
         alert.accessoryView = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 1))
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    private func aboutVersionText() -> String {
+        if let buildTimestamp = Bundle.main.object(forInfoDictionaryKey: "PowerMateHelperBuildTimestamp") as? String,
+           buildTimestamp.isEmpty == false {
+            return "Version: \(buildTimestamp)"
+        }
+
+        return "Version: Development"
     }
 
     @objc private func toggleDockIcon() {

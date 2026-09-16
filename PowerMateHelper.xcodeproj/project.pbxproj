@@ -99,6 +99,7 @@
 				1A2B3C4D5E6F700100000041 /* Sources */,
 				1A2B3C4D5E6F700100000020 /* Frameworks */,
 				1A2B3C4D5E6F700100000042 /* Resources */,
+				1A2B3C4D5E6F700100000043 /* Stamp Build Timestamp */,
 			);
 			buildRules = (
 			);
@@ -152,6 +153,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		1A2B3C4D5E6F700100000043 /* Stamp Build Timestamp */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stamp Build Timestamp";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "BUILD_TIMESTAMP=\"$(date +%y%m%d-%H%M)\"\nPLIST_PATH=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n\nif [ -f \"$PLIST_PATH\" ]; then\n    /usr/libexec/PlistBuddy -c \"Set :PowerMateHelperBuildTimestamp $BUILD_TIMESTAMP\" \"$PLIST_PATH\" 2>/dev/null || \\\n    /usr/libexec/PlistBuddy -c \"Add :PowerMateHelperBuildTimestamp string $BUILD_TIMESTAMP\" \"$PLIST_PATH\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1A2B3C4D5E6F700100000041 /* Sources */ = {

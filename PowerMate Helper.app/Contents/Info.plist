@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>BuildMachineOSBuild</key>
-	<string>25F84</string>
+	<string>25G83</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
@@ -31,19 +31,19 @@
 	<key>DTCompiler</key>
 	<string>com.apple.compilers.llvm.clang.1_0</string>
 	<key>DTPlatformBuild</key>
-	<string>25F70</string>
+	<string>26A425</string>
 	<key>DTPlatformName</key>
 	<string>macosx</string>
 	<key>DTPlatformVersion</key>
-	<string>26.5</string>
+	<string>27.0</string>
 	<key>DTSDKBuild</key>
-	<string>25F70</string>
+	<string>26A425</string>
 	<key>DTSDKName</key>
-	<string>macosx26.5</string>
+	<string>macosx27.0</string>
 	<key>DTXcode</key>
-	<string>2660</string>
+	<string>2700</string>
 	<key>DTXcodeBuild</key>
-	<string>17F113</string>
+	<string>27A266a</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
@@ -52,5 +52,7 @@
 	<string>Copyright © 2026 MGG. All rights reserved.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>PowerMateHelperBuildTimestamp</key>
+	<string>260916-0922</string>
 </dict>
 </plist>
