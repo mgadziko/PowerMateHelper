@@ -30,6 +30,7 @@ final class PowerMateDevice {
     private var status = PowerMateDeviceStatus()
     private var deviceStates: [UInt64: PowerMateDeviceState] = [:]
     private var recentlyRemovedDeviceKeys: Set<String> = []
+    private var statusPublishScheduled = false
 
     private let onRotate: (Int, UInt64) -> Void
     private let onButtonPress: (UInt64) -> Void
@@ -177,10 +178,6 @@ final class PowerMateDevice {
             state.status.rotationCount += 1
         }
 
-        status.devices = sortedDeviceStatuses()
-        status.updatedDeviceID = deviceID
-        publishStatus()
-
         if shouldCallButtonHandler {
             callOnMain { [onButtonPress] in
                 onButtonPress(deviceID)
@@ -192,6 +189,8 @@ final class PowerMateDevice {
                 onRotate(delta, deviceID)
             }
         }
+
+        scheduleStatusPublish(for: deviceID)
     }
 
     private func setConnected(_ connected: Bool) {
@@ -204,6 +203,19 @@ final class PowerMateDevice {
         let status = self.status
         callOnMain { [onStatusChanged] in
             onStatusChanged(status)
+        }
+    }
+
+    private func scheduleStatusPublish(for deviceID: UInt64) {
+        status.updatedDeviceID = deviceID
+        guard statusPublishScheduled == false else { return }
+        statusPublishScheduled = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self else { return }
+            self.statusPublishScheduled = false
+            self.status.devices = self.sortedDeviceStatuses()
+            self.publishStatus()
         }
     }
 

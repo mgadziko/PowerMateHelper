@@ -260,6 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let bundlePath = app.bundleURL?.path.lowercased() ?? ""
 
         return bundleIdentifier == Bundle.main.bundleIdentifier?.lowercased()
+            || bundleIdentifier == "net.quantumpenguin.powermatehelper"
             || bundleIdentifier == "com.gadzikowski.powermatehelper"
             || bundleIdentifier == "com.mgg.powermatehelper"
             || bundleIdentifier == "com.mgg.powermatemgg"
@@ -478,11 +479,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         switch function(for: deviceID) {
         case .volume:
-            let previousVolume = audioController.currentVolume()
-            let volume = audioController.adjustVolume(by: Float(delta) * 0.025)
-            volumeClickFeedback.playIfVolumeChanged(from: previousVolume, to: volume)
-            refreshLED(level: volume, label: "volume", muted: false, sourceDeviceID: deviceID)
-            showVolumeOverlay(volume: volume)
+            let adjustment = audioController.adjustVolume(by: Float(delta) * 0.025)
+            showVolumeOverlay(volume: adjustment.current)
+            volumeClickFeedback.playIfVolumeChanged(from: adjustment.previous, to: adjustment.current)
+            refreshLED(level: adjustment.current, label: "volume", muted: false, sourceDeviceID: deviceID)
         case .screenBrightness:
             let previousBrightness = displayBrightnessController.currentBrightness()
             let brightness = displayBrightnessController.adjustBrightness(by: Float(delta) * 0.025)
@@ -1220,9 +1220,11 @@ private final class VolumeClickFeedback {
 
 private final class LEDController {
     private let minimumSendInterval: TimeInterval = 0.05
+    private let commandQueue = DispatchQueue(label: "net.quantumpenguin.PowerMateHelper.led", qos: .userInitiated)
     private var lastSentBrightness: UInt16?
     private var lastSendTime: TimeInterval = 0
     private var didDisablePulse = false
+    private var commandInFlight = false
     private var pendingRequest: LEDRequest?
     private var sendTimer: Timer?
 
@@ -1249,31 +1251,52 @@ private final class LEDController {
         sendTimer?.invalidate()
         sendTimer = nil
 
+        guard commandInFlight == false else { return }
         guard let request = pendingRequest else { return }
         pendingRequest = nil
 
         let brightnessValue = UInt16((request.brightness * 255.0).rounded())
+        let shouldSendBrightness = lastSentBrightness != brightnessValue
+        let shouldDisablePulse = didDisablePulse == false
+        commandInFlight = true
 
-        let brightnessOK: Bool
-        if lastSentBrightness == brightnessValue {
-            brightnessOK = true
-        } else {
-            brightnessOK = PowerMateUSBLightController.setBrightness(request.brightness)
-            if brightnessOK {
-                lastSentBrightness = brightnessValue
+        commandQueue.async { [weak self] in
+            let brightnessOK = shouldSendBrightness == false
+                || PowerMateUSBLightController.setBrightness(request.brightness)
+            let pulseOK = shouldDisablePulse == false
+                || PowerMateUSBLightController.setPulseEnabled(false)
+
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.commandInFlight = false
+                if shouldSendBrightness && brightnessOK {
+                    self.lastSentBrightness = brightnessValue
+                }
+                if shouldDisablePulse && pulseOK {
+                    self.didDisablePulse = true
+                }
+                self.lastSendTime = ProcessInfo.processInfo.systemUptime
+                request.completion(brightnessOK && pulseOK)
+                self.schedulePendingRequestIfNeeded()
             }
         }
+    }
 
-        let pulseOK: Bool
-        if didDisablePulse {
-            pulseOK = true
-        } else {
-            pulseOK = PowerMateUSBLightController.setPulseEnabled(false)
-            didDisablePulse = pulseOK
+    private func schedulePendingRequestIfNeeded() {
+        guard pendingRequest != nil else { return }
+
+        let delay = max(0, minimumSendInterval - (ProcessInfo.processInfo.systemUptime - lastSendTime))
+        if delay == 0 {
+            sendPendingRequest()
+            return
         }
 
-        lastSendTime = ProcessInfo.processInfo.systemUptime
-        request.completion(brightnessOK && pulseOK)
+        sendTimer?.invalidate()
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            self?.sendPendingRequest()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        sendTimer = timer
     }
 
     private struct LEDRequest {
